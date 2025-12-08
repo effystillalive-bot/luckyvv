@@ -10,15 +10,24 @@ const ATHLETE_NOTES_KEY = 'proformance_athlete_notes';
 // Declare XLSX globally as we load it via script tag
 declare const XLSX: any;
 
+// Helper: Convert Excel Serial Date to JS Date (YYYY-MM-DD)
+const excelDateToJSDate = (serial: number): string => {
+   const utc_days  = Math.floor(serial - 25569);
+   const utc_value = utc_days * 86400;                                        
+   const date_info = new Date(utc_value * 1000);
+   return date_info.toISOString().split('T')[0];
+}
+
 // Helper to map a row (array of values) to AthleteData using a getter function for headers
 const mapRowToAthlete = (getVal: (search: string) => string | null): AthleteData => {
   const name = getVal('name') || 'Unknown';
   // Attempt to standardize date format to YYYY-MM-DD
-  let date = getVal('date') || new Date().toISOString().split('T')[0];
+  let dateRaw = getVal('date');
+  let date = dateRaw || new Date().toISOString().split('T')[0];
   
-  // Simple check if date is Excel serial number (e.g. 45000)
-  if (!date.includes('-') && !date.includes('/') && !isNaN(Number(date))) {
-     // If needed, we could implement excel date conversion here, skipping for now
+  // Check if date is Excel serial number (e.g. 45000)
+  if (dateRaw && !dateRaw.includes('-') && !dateRaw.includes('/') && !isNaN(Number(dateRaw))) {
+      date = excelDateToJSDate(Number(dateRaw));
   }
 
   return {
@@ -56,59 +65,77 @@ const parseCSV = (csvText: string): AthleteData[] => {
   }).filter(d => d.name && d.date && d.name !== 'Unknown');
 };
 
-// Process uploaded file (CSV or Excel)
-export const processFile = (file: File): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-      try {
-        const data = e.target?.result;
-        let parsedData: AthleteData[] = [];
-
-        if (file.name.toLowerCase().endsWith('.csv')) {
-           parsedData = parseCSV(data as string);
-        } else {
-           // Handle Excel
-           if (typeof XLSX === 'undefined') {
-             throw new Error("XLSX library not loaded. Please refresh.");
-           }
-           const workbook = XLSX.read(data, { type: 'binary' });
-           const sheetName = workbook.SheetNames[0];
-           const sheet = workbook.Sheets[sheetName];
-           // header: 1 returns array of arrays [ ['Name', 'Date'], ['John', '2023...'] ]
-           const json = XLSX.utils.sheet_to_json(sheet, { header: 1 }); 
-           
-           if (json.length > 1) {
-             const headers = (json[0] as any[]).map(h => String(h));
-             const rows = json.slice(1) as any[][];
-             
-             parsedData = rows.map((values) => {
-                const getVal = (search: string) => {
-                    const idx = headers.findIndex(h => h.toLowerCase().includes(search.toLowerCase()));
-                    return idx !== -1 && values[idx] !== undefined ? String(values[idx]).trim() : null;
-                };
-                return mapRowToAthlete(getVal);
-             }).filter(d => d.name && d.date && d.name !== 'Unknown');
-           }
-        }
+// Generic File Parser (CSV, Excel, JSON)
+export const parseFile = (file: File): Promise<AthleteData[]> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
         
-        if (parsedData.length > 0) {
-            localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(parsedData));
-        }
-        resolve();
-      } catch (err) {
-        console.error("File processing error", err);
-        reject(err);
-      }
-    };
+        reader.onload = async (e) => {
+            try {
+                const data = e.target?.result;
+                let parsedData: AthleteData[] = [];
 
-    if (file.name.toLowerCase().endsWith('.csv')) {
-        reader.readAsText(file);
-    } else {
-        reader.readAsBinaryString(file);
+                if (file.name.toLowerCase().endsWith('.csv')) {
+                    parsedData = parseCSV(data as string);
+                } else if (file.name.toLowerCase().endsWith('.json')) {
+                    const jsonData = JSON.parse(data as string);
+                    if (Array.isArray(jsonData)) {
+                        // Assume JSON structure matches AthleteData or is simple key-value
+                        parsedData = jsonData.map((item: any) => {
+                            // Quick mapping if keys match loosely, or use mapRowToAthlete logic if complex
+                            const getVal = (key: string) => {
+                                // loose match key
+                                const foundKey = Object.keys(item).find(k => k.toLowerCase().includes(key.toLowerCase()));
+                                return foundKey ? String(item[foundKey]) : null;
+                            };
+                            return mapRowToAthlete(getVal);
+                        });
+                    }
+                } else {
+                    // Handle Excel
+                    if (typeof XLSX === 'undefined') {
+                        throw new Error("XLSX library not loaded. Please refresh.");
+                    }
+                    // For excel we need ArrayBuffer usually, but if readAsBinaryString was used:
+                    const workbook = XLSX.read(data, { type: file.name.toLowerCase().endsWith('.csv') ? 'string' : 'binary' });
+                    const sheetName = workbook.SheetNames[0];
+                    const sheet = workbook.Sheets[sheetName];
+                    const json = XLSX.utils.sheet_to_json(sheet, { header: 1 }); 
+                    
+                    if (json.length > 1) {
+                        const headers = (json[0] as any[]).map(h => String(h));
+                        const rows = json.slice(1) as any[][];
+                        
+                        parsedData = rows.map((values) => {
+                            const getVal = (search: string) => {
+                                const idx = headers.findIndex(h => h.toLowerCase().includes(search.toLowerCase()));
+                                return idx !== -1 && values[idx] !== undefined ? String(values[idx]).trim() : null;
+                            };
+                            return mapRowToAthlete(getVal);
+                        }).filter(d => d.name && d.date && d.name !== 'Unknown');
+                    }
+                }
+                resolve(parsedData);
+            } catch (err) {
+                console.error("Parse error:", err);
+                reject(err);
+            }
+        };
+
+        if (file.name.toLowerCase().endsWith('.csv') || file.name.toLowerCase().endsWith('.json')) {
+            reader.readAsText(file);
+        } else {
+            reader.readAsBinaryString(file);
+        }
+    });
+};
+
+// Process uploaded file (CSV or Excel) for Settings (Overwrites Local Data)
+export const processFile = async (file: File): Promise<void> => {
+    const data = await parseFile(file);
+    if (data.length > 0) {
+        localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(data));
     }
-  });
 };
 
 export const clearLocalData = () => {
@@ -136,6 +163,23 @@ export const addManualEntry = (entry: AthleteData) => {
     } else {
         manualData.push(entry);
     }
+    
+    localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(manualData));
+};
+
+// Batch Add Manual Entries (Merge logic)
+export const batchAddManualEntries = (entries: AthleteData[]) => {
+    const manualDataStr = localStorage.getItem(MANUAL_DATA_KEY);
+    let manualData: AthleteData[] = manualDataStr ? JSON.parse(manualDataStr) : [];
+    
+    entries.forEach(entry => {
+        const existingIndex = manualData.findIndex(d => d.id === entry.id && d.date === entry.date);
+        if (existingIndex >= 0) {
+            manualData[existingIndex] = entry; // Update
+        } else {
+            manualData.push(entry); // Insert
+        }
+    });
     
     localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(manualData));
 };
@@ -183,12 +227,6 @@ export const fetchData = async (): Promise<AthleteData[]> => {
 
   // 3. Merge with Manual Data
   const manualData = getManualEntries();
-  
-  // Combine datasets. If duplicates exist (same ID + Date), manual data typically overrides or is just appended.
-  // For simplicity and clarity in charts, let's treat manual data as "correction" or "addition".
-  // We will map by ID_DATE key to ensure uniqueness if that's desired, or just concat.
-  // Let's concat, but if there's an exact duplicate, the chart might look weird. 
-  // Let's prioritize manual data if date matches.
   
   const dataMap = new Map<string, AthleteData>();
   

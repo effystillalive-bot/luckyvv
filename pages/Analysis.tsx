@@ -1,13 +1,15 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { Search, Save, FileText, Calendar, User, ChevronLeft, ChevronRight, Menu, FileSpreadsheet } from 'lucide-react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { Search, Save, FileText, Calendar, User, ChevronLeft, ChevronRight, FileSpreadsheet, Download, FileJson } from 'lucide-react';
 import { fetchData, saveNote, saveAthleteNote, getAthleteNotes } from '../services/dataService';
 import { AthleteData } from '../types';
 import ChartSection from '../components/ChartSection';
 import MetricCard from '../components/MetricCard';
 import { METRICS } from '../constants';
-import { parseISO, isWithinInterval } from 'date-fns';
+import { parseISO } from 'date-fns';
 
 declare const XLSX: any;
+declare const html2canvas: any;
+declare const window: any;
 
 const Analysis: React.FC = () => {
   const [rawData, setRawData] = useState<AthleteData[]>([]);
@@ -25,6 +27,9 @@ const Analysis: React.FC = () => {
   const [editingNote, setEditingNote] = useState<{id: string, date: string, text: string} | null>(null);
   const [athleteNote, setAthleteNote] = useState<string>('');
   const [isSavingNote, setIsSavingNote] = useState(false);
+  
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -102,26 +107,101 @@ const Analysis: React.FC = () => {
       }
   };
 
-  const handleTableExport = () => {
+  // Export CSV (replacing previous handleTableExport for XLSX)
+  const handleExportCSV = () => {
     if (filteredData.length === 0) return;
+
+    const currentName = athletes.find(a => a.id === selectedAthleteId)?.name || 'Athlete';
     
-    // Prepare export data
-    const exportData = [...filteredData].reverse().map(record => {
-        const row: any = { Date: record.date };
-        METRICS.forEach(m => {
-            row[m.label] = record[m.key];
-        });
-        row['Notes'] = record.note || '';
-        return row;
+    // Build CSV Content
+    const csvRows = [];
+    
+    // 1. Header Info
+    csvRows.push(`Athlete Name,${currentName}`);
+    csvRows.push(`Export Date,${new Date().toISOString().split('T')[0]}`);
+    csvRows.push(`Profile Note,"${(athleteNote || '').replace(/"/g, '""')}"`);
+    csvRows.push(''); // Blank line separator
+
+    // 2. Data Table Header
+    const headers = ['Date', ...METRICS.map(m => m.label), 'Daily Note'];
+    csvRows.push(headers.join(','));
+
+    // 3. Data Rows
+    [...filteredData].reverse().forEach(record => {
+        const row = [
+            record.date,
+            ...METRICS.map(m => record[m.key] !== undefined ? record[m.key] : ''),
+            `"${(record.note || '').replace(/"/g, '""')}"` // Escape quotes for CSV
+        ];
+        csvRows.push(row.join(','));
     });
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Athlete Data");
-    // Ensure filename is safe
-    const currentName = athletes.find(a => a.id === selectedAthleteId)?.name || 'Athlete';
+    const csvContent = "data:text/csv;charset=utf-8," + encodeURIComponent(csvRows.join('\n'));
+    const link = document.createElement("a");
     const safeName = currentName.replace(/[^a-z0-9]/gi, '_');
-    XLSX.writeFile(wb, `${safeName}_History.xlsx`);
+    link.setAttribute("href", csvContent);
+    link.setAttribute("download", `${safeName}_Full_Data.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportPDF = async () => {
+      if (!contentRef.current) return;
+      setIsExportingPdf(true);
+
+      try {
+          const element = contentRef.current;
+          
+          // Capture the entire scrollable height
+          const canvas = await html2canvas(element, {
+              backgroundColor: '#0f172a', // Match theme background
+              scale: 2, // Higher resolution
+              useCORS: true,
+              logging: false,
+              height: element.scrollHeight,
+              windowHeight: element.scrollHeight,
+              ignoreElements: (el: any) => {
+                  return el.classList.contains('no-export');
+              },
+              onclone: (documentClone: any) => {
+                  // Ensure full height is visible in clone
+                  const el = documentClone.querySelector('.export-container');
+                  if (el) {
+                      el.style.height = 'auto';
+                      el.style.overflow = 'visible';
+                  }
+              }
+          });
+
+          const imgData = canvas.toDataURL('image/png');
+          const { jsPDF } = window.jspdf;
+          
+          // Calculate dimensions to fit a single continuous page
+          // Standard PDF width (A4 width approx 210mm)
+          const pdfWidth = 210; 
+          const pixelToMmRatio = 210 / canvas.width;
+          const pdfHeight = canvas.height * pixelToMmRatio;
+
+          // Create PDF with custom dimensions matching the content
+          const pdf = new jsPDF({
+              orientation: 'p',
+              unit: 'mm',
+              format: [pdfWidth, pdfHeight]
+          });
+          
+          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+
+          const currentName = athletes.find(a => a.id === selectedAthleteId)?.name || 'Athlete';
+          const safeName = currentName.replace(/[^a-z0-9]/gi, '_');
+          pdf.save(`${safeName}_Report.pdf`);
+
+      } catch (error) {
+          console.error("PDF generation failed", error);
+          alert("Failed to generate PDF report.");
+      } finally {
+          setIsExportingPdf(false);
+      }
   };
 
   if (loading) return <div className="p-10 text-center text-slate-500">Loading Analysis...</div>;
@@ -163,8 +243,6 @@ const Analysis: React.FC = () => {
                       key={athlete.id}
                       onClick={() => {
                           setSelectedAthleteId(athlete.id);
-                          // On mobile, maybe close sidebar after selection? 
-                          // setIsSidebarOpen(false); // Optional based on UX preference
                       }}
                       className={`w-full text-left px-4 py-3 border-b border-slate-800/30 hover:bg-slate-800/80 transition-all flex items-center gap-3 group
                           ${selectedAthleteId === athlete.id 
@@ -202,7 +280,7 @@ const Analysis: React.FC = () => {
       <div className={`absolute z-30 top-4 transition-all duration-300 ${isSidebarOpen ? 'left-80' : 'left-0'}`}>
          <button 
              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-             className="bg-slate-800 border border-slate-700 border-l-0 text-slate-400 hover:text-white hover:bg-slate-700 h-10 w-6 flex items-center justify-center rounded-r-lg shadow-md focus:outline-none"
+             className="bg-slate-800 border border-slate-700 border-l-0 text-slate-400 hover:text-white hover:bg-slate-700 h-10 w-6 flex items-center justify-center rounded-r-lg shadow-md focus:outline-none no-export"
              title={isSidebarOpen ? "Collapse List" : "Expand List"}
          >
              {isSidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
@@ -211,7 +289,7 @@ const Analysis: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 bg-slate-950/50 relative">
-         <div className="flex-1 overflow-y-auto p-4 lg:p-8 scroll-smooth">
+         <div className="flex-1 overflow-y-auto p-4 lg:p-8 scroll-smooth export-container" ref={contentRef}>
             
             {/* Main Header / Filters */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-8 pl-8 lg:pl-0">
@@ -226,21 +304,46 @@ const Analysis: React.FC = () => {
                      </h2>
                 </div>
                 
-                <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm">
-                    <Calendar className="w-4 h-4 text-primary-500" />
-                    <input 
-                        type="date" 
-                        className="bg-transparent text-white text-sm outline-none w-32 border-none focus:ring-0 p-0"
-                        value={dateRange.start}
-                        onChange={(e) => setDateRange(prev => ({...prev, start: e.target.value}))}
-                    />
-                    <span className="text-slate-600">-</span>
-                    <input 
-                        type="date" 
-                        className="bg-transparent text-white text-sm outline-none w-32 border-none focus:ring-0 p-0"
-                        value={dateRange.end}
-                        onChange={(e) => setDateRange(prev => ({...prev, end: e.target.value}))}
-                    />
+                <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm no-export">
+                        <Calendar className="w-4 h-4 text-primary-500" />
+                        <input 
+                            type="date" 
+                            className="bg-transparent text-white text-sm outline-none w-32 border-none focus:ring-0 p-0"
+                            value={dateRange.start}
+                            onChange={(e) => setDateRange(prev => ({...prev, start: e.target.value}))}
+                        />
+                        <span className="text-slate-600">-</span>
+                        <input 
+                            type="date" 
+                            className="bg-transparent text-white text-sm outline-none w-32 border-none focus:ring-0 p-0"
+                            value={dateRange.end}
+                            onChange={(e) => setDateRange(prev => ({...prev, end: e.target.value}))}
+                        />
+                    </div>
+
+                    {/* Export Buttons */}
+                    {currentRecord && (
+                        <>
+                            <button 
+                                onClick={handleExportCSV}
+                                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-1.5 rounded-lg border border-slate-700 transition-colors no-export"
+                                title="Download Full Data CSV"
+                            >
+                                <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+                                <span className="hidden sm:inline">Export CSV</span>
+                            </button>
+                            <button 
+                                onClick={handleExportPDF}
+                                disabled={isExportingPdf}
+                                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-1.5 rounded-lg border border-slate-700 transition-colors no-export disabled:opacity-50"
+                                title="Download Full Report PDF"
+                            >
+                                <Download className="w-4 h-4 text-rose-500" />
+                                <span className="hidden sm:inline">{isExportingPdf ? 'Generating...' : 'Report PDF'}</span>
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -312,15 +415,8 @@ const Analysis: React.FC = () => {
                     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg mb-8">
                         <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900">
                             <h3 className="text-lg font-semibold text-white">Historical Data Log</h3>
-                            <div className="flex items-center gap-3">
-                                <span className="text-xs text-slate-500 hidden sm:inline">Editable Notes (Click to edit)</span>
-                                <button 
-                                    onClick={handleTableExport}
-                                    className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2 py-1.5 rounded border border-slate-700 transition-colors"
-                                    title="Export Table to Excel"
-                                >
-                                    <FileSpreadsheet className="w-3 h-3" /> Export
-                                </button>
+                            <div className="flex items-center gap-3 no-export">
+                                <span className="text-xs text-slate-500 hidden sm:inline">Editable Notes</span>
                             </div>
                         </div>
                         <div className="overflow-x-auto">
@@ -395,7 +491,7 @@ const Analysis: React.FC = () => {
                                 className={`text-xs px-3 py-1.5 rounded font-medium transition-all flex items-center gap-1.5 
                                     ${isSavingNote 
                                         ? 'bg-emerald-500/20 text-emerald-500 cursor-default' 
-                                        : 'bg-primary-500 text-white hover:bg-primary-600 shadow-lg shadow-primary-500/20'
+                                        : 'bg-primary-500 text-white hover:bg-primary-600 shadow-lg shadow-primary-500/20 no-export'
                                     }`}
                             >
                                 {isSavingNote ? <span className="flex items-center gap-1">Saving...</span> : <span className="flex items-center gap-1"><Save className="w-3 h-3"/> Save Note</span>}

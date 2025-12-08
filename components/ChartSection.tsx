@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React from 'react';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -8,17 +8,10 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
-  ReferenceLine
+  Legend
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
-import { FileSpreadsheet, FileImage, Download } from 'lucide-react';
 import { MetricDefinition } from '../types';
-
-// Declare global libraries loaded via CDN
-declare const XLSX: any;
-declare const html2canvas: any;
-declare const window: any; // for jspdf access
 
 interface ChartSectionProps {
   title: string;
@@ -50,91 +43,10 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 const ChartSection: React.FC<ChartSectionProps> = ({ title, data, metrics, type = 'line', height = 300 }) => {
-  const chartRef = useRef<HTMLDivElement>(null);
-  const [isExporting, setIsExporting] = useState(false);
-
-  const handleExportExcel = () => {
-    if (!data || data.length === 0) return;
-
-    // Filter and map data to be export-friendly (focusing on displayed metrics)
-    const exportData = data.map((row: any) => {
-        const newRow: any = { Date: row.date };
-        metrics.forEach(m => {
-            if (row[m.key] !== undefined) {
-                newRow[m.label] = row[m.key];
-            }
-        });
-        return newRow;
-    });
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Chart Data");
-    const safeTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-    XLSX.writeFile(wb, `${safeTitle}_data.xlsx`);
-  };
-
-  const handleExportPDF = async () => {
-    if (!chartRef.current) return;
-    setIsExporting(true);
-
-    try {
-        // html2canvas capture
-        const canvas = await html2canvas(chartRef.current, {
-            backgroundColor: '#0f172a', // Ensure background matches theme
-            scale: 2, // Better resolution
-            logging: false,
-            useCORS: true
-        });
-
-        const imgData = canvas.toDataURL('image/png');
-        
-        // jspdf generation
-        const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF({
-            orientation: 'landscape',
-            unit: 'mm',
-        });
-
-        const imgProps = pdf.getImageProperties(imgData);
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-        
-        pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight);
-        
-        const safeTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        pdf.save(`${safeTitle}_chart.pdf`);
-    } catch (err) {
-        console.error("PDF Export failed:", err);
-        alert("Failed to generate PDF");
-    } finally {
-        setIsExporting(false);
-    }
-  };
-
   return (
-    <div ref={chartRef} className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 w-full relative group">
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 w-full relative group">
       <div className="flex justify-between items-center mb-6">
         <h3 className="text-lg font-semibold text-white">{title}</h3>
-        
-        {/* Export Controls - Always visible now */}
-        <div className="flex gap-2" data-html2canvas-ignore>
-            <button 
-                onClick={handleExportExcel}
-                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-emerald-500 hover:bg-slate-700 transition-colors"
-                title="Export Data to Excel"
-            >
-                <FileSpreadsheet className="w-4 h-4" />
-            </button>
-            <button 
-                onClick={handleExportPDF}
-                disabled={isExporting}
-                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-rose-500 hover:bg-slate-700 transition-colors disabled:opacity-50"
-                title="Export Chart to PDF"
-            >
-                <FileImage className="w-4 h-4" />
-            </button>
-        </div>
       </div>
 
       <div style={{ width: '100%', height: height }}>
