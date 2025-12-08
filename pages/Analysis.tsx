@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Search, Save, FileText, Calendar, User, ChevronLeft, ChevronRight, FileSpreadsheet, Download, FileJson } from 'lucide-react';
-import { fetchData, saveNote, saveAthleteNote, getAthleteNotes } from '../services/dataService';
+import { Search, Save, FileText, Calendar, User, ChevronLeft, ChevronRight, FileSpreadsheet, Download, FileJson, Trash2, GripVertical, Settings2, Check } from 'lucide-react';
+import { fetchData, saveNote, saveAthleteNote, getAthleteNotes, deleteSpecificEntry, deleteAthleteProfile, saveAthleteOrder, getAthleteOrder } from '../services/dataService';
 import { AthleteData } from '../types';
 import ChartSection from '../components/ChartSection';
 import MetricCard from '../components/MetricCard';
@@ -19,6 +19,7 @@ const Analysis: React.FC = () => {
   // Layout State
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isManageMode, setIsManageMode] = useState(false); // Mode to delete/sort athletes
   
   // Filtering State
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
@@ -28,18 +29,29 @@ const Analysis: React.FC = () => {
   const [athleteNote, setAthleteNote] = useState<string>('');
   const [isSavingNote, setIsSavingNote] = useState(false);
   
+  // Sorting State
+  const [athleteOrder, setAthleteOrder] = useState<string[]>([]);
+  const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
+  
   const contentRef = useRef<HTMLDivElement>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
 
-  useEffect(() => {
-    const load = async () => {
+  const loadData = async () => {
       const data = await fetchData();
       setRawData(data);
       // Sort data by date ascending
       data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       
-      // Default selection
-      if (data.length > 0) {
+      const savedOrder = getAthleteOrder();
+      setAthleteOrder(savedOrder);
+
+      return data;
+  };
+
+  useEffect(() => {
+    loadData().then((data) => {
+      // Default selection if none
+      if (data.length > 0 && !selectedAthleteId) {
         setSelectedAthleteId(data[0].id);
         
         // Default Date Range: Last 6 months or full range
@@ -49,8 +61,7 @@ const Analysis: React.FC = () => {
         setDateRange({ start: minDate, end: maxDate });
       }
       setLoading(false);
-    };
-    load();
+    });
   }, []);
 
   // Sync Athlete General Note
@@ -61,11 +72,33 @@ const Analysis: React.FC = () => {
       }
   }, [selectedAthleteId]);
 
+  // Compute sorted athlete list
   const athletes = useMemo(() => {
     const unique = new Map();
     rawData.forEach(d => unique.set(d.id, d.name));
-    return Array.from(unique.entries()).map(([id, name]) => ({ id, name }));
-  }, [rawData]);
+    
+    let list = Array.from(unique.entries()).map(([id, name]) => ({ id, name }));
+    
+    // Apply sort order
+    if (athleteOrder.length > 0) {
+        list.sort((a, b) => {
+            const idxA = athleteOrder.indexOf(a.id);
+            const idxB = athleteOrder.indexOf(b.id);
+            // If both exist in order array, sort by index
+            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+            // If one exists, put it first
+            if (idxA !== -1) return -1;
+            if (idxB !== -1) return 1;
+            // Otherwise alphabetical
+            return a.name.localeCompare(b.name);
+        });
+    } else {
+        // Default alpha
+        list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    
+    return list;
+  }, [rawData, athleteOrder]);
 
   const filteredAthletes = useMemo(() => {
       if (!searchTerm) return athletes;
@@ -87,6 +120,62 @@ const Analysis: React.FC = () => {
     });
   }, [rawData, selectedAthleteId, dateRange]);
 
+  // --- Deletion Handlers ---
+
+  const handleDeleteRecord = async (record: AthleteData) => {
+      if (window.confirm(`Delete record for ${record.date}? This cannot be undone.`)) {
+          deleteSpecificEntry(record.id, record.date);
+          await loadData(); // Reload
+      }
+  };
+
+  const handleDeleteAthlete = async (athleteId: string, event: React.MouseEvent) => {
+      event.stopPropagation(); // Prevent selection
+      if (window.confirm(`Are you sure you want to delete this athlete and ALL their data?`)) {
+          deleteAthleteProfile(athleteId);
+          await loadData();
+          if (selectedAthleteId === athleteId) {
+              setSelectedAthleteId('');
+          }
+      }
+  };
+
+  // --- Sorting Handlers (Drag & Drop) ---
+
+  const handleDragStart = (index: number) => {
+      setDraggedItemIndex(index);
+  };
+
+  const handleDragEnter = (index: number) => {
+      if (draggedItemIndex === null || draggedItemIndex === index) return;
+      
+      // Reorder the filteredAthletes array temporarily in UI
+      const newAthletes = [...filteredAthletes];
+      const draggedItem = newAthletes[draggedItemIndex];
+      newAthletes.splice(draggedItemIndex, 1);
+      newAthletes.splice(index, 0, draggedItem);
+      
+      // We need to update the source of truth (Order ID List)
+      // Extract IDs from the new visual order
+      const newOrderIds = newAthletes.map(a => a.id);
+      
+      // Merge with any IDs that might be hidden by search filter (append them at end)
+      const visibleIds = new Set(newOrderIds);
+      const hiddenIds = athleteOrder.filter(id => !visibleIds.has(id));
+      
+      const finalOrder = [...newOrderIds, ...hiddenIds];
+      
+      setAthleteOrder(finalOrder);
+      setDraggedItemIndex(index);
+  };
+
+  const handleDragEnd = () => {
+      setDraggedItemIndex(null);
+      saveAthleteOrder(athleteOrder);
+  };
+
+  // --- Note Saving ---
+
   const handleNoteSave = (record: AthleteData, text: string) => {
     saveNote(record.id, record.date, text);
     // Optimistic update
@@ -107,7 +196,8 @@ const Analysis: React.FC = () => {
       }
   };
 
-  // Export CSV (replacing previous handleTableExport for XLSX)
+  // --- Export ---
+
   const handleExportCSV = () => {
     if (filteredData.length === 0) return;
 
@@ -115,23 +205,19 @@ const Analysis: React.FC = () => {
     
     // Build CSV Content
     const csvRows = [];
-    
-    // 1. Header Info
     csvRows.push(`Athlete Name,${currentName}`);
     csvRows.push(`Export Date,${new Date().toISOString().split('T')[0]}`);
     csvRows.push(`Profile Note,"${(athleteNote || '').replace(/"/g, '""')}"`);
-    csvRows.push(''); // Blank line separator
+    csvRows.push(''); 
 
-    // 2. Data Table Header
     const headers = ['Date', ...METRICS.map(m => m.label), 'Daily Note'];
     csvRows.push(headers.join(','));
 
-    // 3. Data Rows
     [...filteredData].reverse().forEach(record => {
         const row = [
             record.date,
             ...METRICS.map(m => record[m.key] !== undefined ? record[m.key] : ''),
-            `"${(record.note || '').replace(/"/g, '""')}"` // Escape quotes for CSV
+            `"${(record.note || '').replace(/"/g, '""')}"` 
         ];
         csvRows.push(row.join(','));
     });
@@ -152,11 +238,9 @@ const Analysis: React.FC = () => {
 
       try {
           const element = contentRef.current;
-          
-          // Capture the entire scrollable height
           const canvas = await html2canvas(element, {
-              backgroundColor: '#0f172a', // Match theme background
-              scale: 2, // Higher resolution
+              backgroundColor: '#0f172a', 
+              scale: 2, 
               useCORS: true,
               logging: false,
               height: element.scrollHeight,
@@ -165,7 +249,6 @@ const Analysis: React.FC = () => {
                   return el.classList.contains('no-export');
               },
               onclone: (documentClone: any) => {
-                  // Ensure full height is visible in clone
                   const el = documentClone.querySelector('.export-container');
                   if (el) {
                       el.style.height = 'auto';
@@ -177,13 +260,10 @@ const Analysis: React.FC = () => {
           const imgData = canvas.toDataURL('image/png');
           const { jsPDF } = window.jspdf;
           
-          // Calculate dimensions to fit a single continuous page
-          // Standard PDF width (A4 width approx 210mm)
           const pdfWidth = 210; 
           const pixelToMmRatio = 210 / canvas.width;
           const pdfHeight = canvas.height * pixelToMmRatio;
 
-          // Create PDF with custom dimensions matching the content
           const pdf = new jsPDF({
               orientation: 'p',
               unit: 'mm',
@@ -220,9 +300,18 @@ const Analysis: React.FC = () => {
           <div className={`p-4 border-b border-slate-800 flex flex-col gap-3 ${!isSidebarOpen && 'hidden lg:hidden'}`}>
               <div className="flex justify-between items-center">
                 <h3 className="text-white font-bold text-lg">Athletes</h3>
-                <span className="bg-slate-800 text-slate-400 text-xs px-2 py-0.5 rounded-full font-mono">
-                    {filteredAthletes.length}
-                </span>
+                <div className="flex items-center gap-2">
+                    <span className="bg-slate-800 text-slate-400 text-xs px-2 py-0.5 rounded-full font-mono">
+                        {filteredAthletes.length}
+                    </span>
+                    <button 
+                        onClick={() => setIsManageMode(!isManageMode)}
+                        className={`p-1.5 rounded transition-colors ${isManageMode ? 'bg-primary-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                        title={isManageMode ? "Finish Editing" : "Manage List"}
+                    >
+                        {isManageMode ? <Check className="w-3.5 h-3.5" /> : <Settings2 className="w-3.5 h-3.5" />}
+                    </button>
+                </div>
               </div>
               <div className="relative">
                   <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
@@ -236,36 +325,55 @@ const Analysis: React.FC = () => {
               </div>
           </div>
           
-          {/* Athlete List */}
+          {/* Athlete List with Drag & Drop */}
           <div className={`flex-1 overflow-y-auto overflow-x-hidden ${!isSidebarOpen && 'hidden lg:hidden'}`}>
-              {filteredAthletes.map(athlete => (
-                  <button
+              {filteredAthletes.map((athlete, index) => (
+                  <div
                       key={athlete.id}
-                      onClick={() => {
-                          setSelectedAthleteId(athlete.id);
-                      }}
-                      className={`w-full text-left px-4 py-3 border-b border-slate-800/30 hover:bg-slate-800/80 transition-all flex items-center gap-3 group
-                          ${selectedAthleteId === athlete.id 
+                      draggable={isManageMode && !searchTerm} // Only drag if not searching
+                      onDragStart={() => handleDragStart(index)}
+                      onDragEnter={() => handleDragEnter(index)}
+                      onDragEnd={handleDragEnd}
+                      onDragOver={(e) => e.preventDefault()}
+                      onClick={() => !isManageMode && setSelectedAthleteId(athlete.id)}
+                      className={`w-full text-left px-4 py-3 border-b border-slate-800/30 hover:bg-slate-800/80 transition-all flex items-center gap-3 group relative cursor-pointer
+                          ${selectedAthleteId === athlete.id && !isManageMode
                               ? 'bg-slate-800 border-l-4 border-l-primary-500' 
                               : 'border-l-4 border-l-transparent'
                           }
+                          ${isManageMode ? 'cursor-grab active:cursor-grabbing' : ''}
                       `}
                   >
-                      <div className={`
-                          w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors
-                          ${selectedAthleteId === athlete.id 
-                              ? 'bg-primary-500 text-white shadow-lg shadow-primary-500/20' 
-                              : 'bg-slate-800 text-slate-500 group-hover:bg-slate-700 group-hover:text-slate-300'
-                          }
-                      `}>
-                          <User className="w-4 h-4" />
-                      </div>
-                      <div className="truncate">
-                        <span className={`font-medium block truncate ${selectedAthleteId === athlete.id ? 'text-white' : 'text-slate-300 group-hover:text-white'}`}>
+                      {isManageMode ? (
+                          <GripVertical className="w-4 h-4 text-slate-600" />
+                      ) : (
+                          <div className={`
+                              w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors
+                              ${selectedAthleteId === athlete.id 
+                                  ? 'bg-primary-500 text-white shadow-lg shadow-primary-500/20' 
+                                  : 'bg-slate-800 text-slate-500 group-hover:bg-slate-700 group-hover:text-slate-300'
+                              }
+                          `}>
+                              <User className="w-4 h-4" />
+                          </div>
+                      )}
+
+                      <div className="truncate flex-1">
+                        <span className={`font-medium block truncate ${selectedAthleteId === athlete.id && !isManageMode ? 'text-white' : 'text-slate-300 group-hover:text-white'}`}>
                             {athlete.name}
                         </span>
                       </div>
-                  </button>
+
+                      {isManageMode && (
+                          <button 
+                              onClick={(e) => handleDeleteAthlete(athlete.id, e)}
+                              className="p-1.5 text-rose-500 hover:bg-rose-900/30 rounded"
+                              title="Delete Athlete"
+                          >
+                              <Trash2 className="w-4 h-4" />
+                          </button>
+                      )}
+                  </div>
               ))}
               
               {filteredAthletes.length === 0 && (
@@ -428,11 +536,12 @@ const Analysis: React.FC = () => {
                                             <th key={m.key} className="px-4 py-3 whitespace-nowrap" style={{ color: m.color }}>{m.label}</th>
                                         ))}
                                         <th className="px-4 py-3 min-w-[200px]">Coach Note</th>
+                                        <th className="px-4 py-3 w-10 no-export"></th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-800">
                                     {[...filteredData].reverse().map((record) => (
-                                        <tr key={`${record.id}-${record.date}`} className="hover:bg-slate-800/50 transition-colors">
+                                        <tr key={`${record.id}-${record.date}`} className="hover:bg-slate-800/50 transition-colors group/row">
                                             <td className="px-4 py-3 font-mono sticky left-0 bg-slate-900 z-10 border-r border-slate-800 text-slate-300 font-medium">{record.date}</td>
                                             {METRICS.map(m => (
                                                 <td key={m.key} className="px-4 py-3 text-slate-300 tabular-nums">
@@ -471,6 +580,15 @@ const Analysis: React.FC = () => {
                                                         )}
                                                     </div>
                                                 )}
+                                            </td>
+                                            <td className="px-4 py-3 text-center no-export">
+                                                <button 
+                                                    onClick={() => handleDeleteRecord(record)}
+                                                    className="text-slate-600 hover:text-rose-500 transition-colors opacity-0 group-hover/row:opacity-100"
+                                                    title="Delete this record"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
                                             </td>
                                         </tr>
                                     ))}

@@ -2,11 +2,12 @@ import { AthleteData } from '../types';
 import { MOCK_DATA_CSV } from '../constants';
 
 const SETTINGS_KEY = 'proformance_settings_sheet_url';
-const SCRIPT_URL_KEY = 'proformance_google_script_url'; // New Key
+const SCRIPT_URL_KEY = 'proformance_google_script_url'; 
 const LOCAL_DATA_KEY = 'proformance_local_data';
 const MANUAL_DATA_KEY = 'proformance_manual_data';
 const NOTES_KEY = 'proformance_notes';
 const ATHLETE_NOTES_KEY = 'proformance_athlete_notes';
+const ATHLETE_ORDER_KEY = 'proformance_athlete_order'; // New key for sorting
 
 // Declare XLSX globally as we load it via script tag
 declare const XLSX: any;
@@ -249,6 +250,65 @@ export const getManualEntries = (): AthleteData[] => {
 export const clearManualData = () => {
     localStorage.removeItem(MANUAL_DATA_KEY);
 };
+
+// --- Deletion & Sorting Features ---
+
+export const deleteSpecificEntry = (athleteId: string, date: string) => {
+    // 1. Remove from Local File Data
+    const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
+    if (localDataStr) {
+        let localData: AthleteData[] = JSON.parse(localDataStr);
+        localData = localData.filter(d => !(d.id === athleteId && d.date === date));
+        localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(localData));
+    }
+
+    // 2. Remove from Manual Data
+    const manualDataStr = localStorage.getItem(MANUAL_DATA_KEY);
+    if (manualDataStr) {
+        let manualData: AthleteData[] = JSON.parse(manualDataStr);
+        manualData = manualData.filter(d => !(d.id === athleteId && d.date === date));
+        localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(manualData));
+    }
+};
+
+export const deleteAthleteProfile = (athleteId: string) => {
+    // 1. Remove from Local Data
+    const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
+    if (localDataStr) {
+        let localData: AthleteData[] = JSON.parse(localDataStr);
+        localData = localData.filter(d => d.id !== athleteId);
+        localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(localData));
+    }
+
+    // 2. Remove from Manual Data
+    const manualDataStr = localStorage.getItem(MANUAL_DATA_KEY);
+    if (manualDataStr) {
+        let manualData: AthleteData[] = JSON.parse(manualDataStr);
+        manualData = manualData.filter(d => d.id !== athleteId);
+        localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(manualData));
+    }
+
+    // 3. Remove Notes
+    const athleteNotes = getAthleteNotes();
+    delete athleteNotes[athleteId];
+    localStorage.setItem(ATHLETE_NOTES_KEY, JSON.stringify(athleteNotes));
+
+    // 4. Remove from Sort Order
+    let order = getAthleteOrder();
+    order = order.filter(id => id !== athleteId);
+    saveAthleteOrder(order);
+};
+
+export const saveAthleteOrder = (athleteIds: string[]) => {
+    localStorage.setItem(ATHLETE_ORDER_KEY, JSON.stringify(athleteIds));
+};
+
+export const getAthleteOrder = (): string[] => {
+    const str = localStorage.getItem(ATHLETE_ORDER_KEY);
+    return str ? JSON.parse(str) : [];
+};
+
+// --- End Deletion & Sorting ---
 
 export const fetchData = async (): Promise<AthleteData[]> => {
   let baseData: AthleteData[] = [];
