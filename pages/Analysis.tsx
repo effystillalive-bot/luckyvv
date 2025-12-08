@@ -214,7 +214,7 @@ const Analysis: React.FC = () => {
       
       {/* Sidebar - Athlete List */}
       <div 
-        className={`${isSidebarOpen ? 'w-96 translate-x-0' : 'w-0 -translate-x-full lg:translate-x-0 lg:w-0'} absolute lg:relative z-20 h-full bg-slate-900 border-r border-slate-800 transition-all duration-300 flex flex-col`}
+        className={`${isSidebarOpen ? 'w-80 translate-x-0' : 'w-0 -translate-x-full lg:translate-x-0 lg:w-0'} absolute lg:relative z-20 h-full bg-slate-900 border-r border-slate-800 transition-all duration-300 flex flex-col`}
       >
           {/* Sidebar Header */}
           <div className={`p-4 border-b border-slate-800 flex flex-col gap-3 ${!isSidebarOpen && 'hidden lg:hidden'}`}>
@@ -277,7 +277,7 @@ const Analysis: React.FC = () => {
       </div>
 
       {/* Toggle Button (Desktop & Mobile) */}
-      <div className={`absolute z-30 top-4 transition-all duration-300 ${isSidebarOpen ? 'left-96' : 'left-0'}`}>
+      <div className={`absolute z-30 top-4 transition-all duration-300 ${isSidebarOpen ? 'left-80' : 'left-0'}`}>
          <button 
              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
              className="bg-slate-800 border border-slate-700 border-l-0 text-slate-400 hover:text-white hover:bg-slate-700 h-10 w-6 flex items-center justify-center rounded-r-lg shadow-md focus:outline-none no-export"
