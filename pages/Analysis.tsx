@@ -214,7 +214,7 @@ const Analysis: React.FC = () => {
       
       {/* Sidebar - Athlete List */}
       <div 
-        className={`${isSidebarOpen ? 'w-80 translate-x-0' : 'w-0 -translate-x-full lg:translate-x-0 lg:w-0'} absolute lg:relative z-20 h-full bg-slate-900 border-r border-slate-800 transition-all duration-300 flex flex-col`}
+        className={`${isSidebarOpen ? 'w-96 translate-x-0' : 'w-0 -translate-x-full lg:translate-x-0 lg:w-0'} absolute lg:relative z-20 h-full bg-slate-900 border-r border-slate-800 transition-all duration-300 flex flex-col`}
       >
           {/* Sidebar Header */}
           <div className={`p-4 border-b border-slate-800 flex flex-col gap-3 ${!isSidebarOpen && 'hidden lg:hidden'}`}>
@@ -277,7 +277,7 @@ const Analysis: React.FC = () => {
       </div>
 
       {/* Toggle Button (Desktop & Mobile) */}
-      <div className={`absolute z-30 top-4 transition-all duration-300 ${isSidebarOpen ? 'left-80' : 'left-0'}`}>
+      <div className={`absolute z-30 top-4 transition-all duration-300 ${isSidebarOpen ? 'left-96' : 'left-0'}`}>
          <button 
              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
              className="bg-slate-800 border border-slate-700 border-l-0 text-slate-400 hover:text-white hover:bg-slate-700 h-10 w-6 flex items-center justify-center rounded-r-lg shadow-md focus:outline-none no-export"
@@ -304,19 +304,19 @@ const Analysis: React.FC = () => {
                      </h2>
                 </div>
                 
-                <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm no-export">
+                <div className="flex flex-nowrap items-center gap-2 lg:gap-3 overflow-x-auto">
+                    <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm no-export shrink-0">
                         <Calendar className="w-4 h-4 text-primary-500" />
                         <input 
                             type="date" 
-                            className="bg-transparent text-white text-sm outline-none w-32 border-none focus:ring-0 p-0"
+                            className="bg-transparent text-white text-sm outline-none w-28 lg:w-32 border-none focus:ring-0 p-0"
                             value={dateRange.start}
                             onChange={(e) => setDateRange(prev => ({...prev, start: e.target.value}))}
                         />
                         <span className="text-slate-600">-</span>
                         <input 
                             type="date" 
-                            className="bg-transparent text-white text-sm outline-none w-32 border-none focus:ring-0 p-0"
+                            className="bg-transparent text-white text-sm outline-none w-28 lg:w-32 border-none focus:ring-0 p-0"
                             value={dateRange.end}
                             onChange={(e) => setDateRange(prev => ({...prev, end: e.target.value}))}
                         />
@@ -327,20 +327,20 @@ const Analysis: React.FC = () => {
                         <>
                             <button 
                                 onClick={handleExportCSV}
-                                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-1.5 rounded-lg border border-slate-700 transition-colors no-export"
+                                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-1.5 rounded-lg border border-slate-700 transition-colors no-export shrink-0"
                                 title="Download Full Data CSV"
                             >
                                 <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
-                                <span className="hidden sm:inline">Export CSV</span>
+                                <span className="hidden sm:inline">CSV</span>
                             </button>
                             <button 
                                 onClick={handleExportPDF}
                                 disabled={isExportingPdf}
-                                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-1.5 rounded-lg border border-slate-700 transition-colors no-export disabled:opacity-50"
+                                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-sm px-3 py-1.5 rounded-lg border border-slate-700 transition-colors no-export disabled:opacity-50 shrink-0"
                                 title="Download Full Report PDF"
                             >
                                 <Download className="w-4 h-4 text-rose-500" />
-                                <span className="hidden sm:inline">{isExportingPdf ? 'Generating...' : 'Report PDF'}</span>
+                                <span className="hidden sm:inline">{isExportingPdf ? '...' : 'PDF'}</span>
                             </button>
                         </>
                     )}
