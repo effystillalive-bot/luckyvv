@@ -2,6 +2,7 @@ import { AthleteData } from '../types';
 import { MOCK_DATA_CSV } from '../constants';
 
 const SETTINGS_KEY = 'proformance_settings_sheet_url';
+const SCRIPT_URL_KEY = 'proformance_google_script_url'; // New Key
 const LOCAL_DATA_KEY = 'proformance_local_data';
 const MANUAL_DATA_KEY = 'proformance_manual_data';
 const NOTES_KEY = 'proformance_notes';
@@ -69,44 +70,42 @@ const parseCSV = (csvText: string): AthleteData[] => {
 export const parseFile = (file: File): Promise<AthleteData[]> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
+        const isExcel = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls');
         
         reader.onload = async (e) => {
             try {
                 const data = e.target?.result;
                 let parsedData: AthleteData[] = [];
 
-                if (file.name.toLowerCase().endsWith('.csv')) {
-                    parsedData = parseCSV(data as string);
-                } else if (file.name.toLowerCase().endsWith('.json')) {
-                    const jsonData = JSON.parse(data as string);
-                    if (Array.isArray(jsonData)) {
-                        // Assume JSON structure matches AthleteData or is simple key-value
-                        parsedData = jsonData.map((item: any) => {
-                            // Quick mapping if keys match loosely, or use mapRowToAthlete logic if complex
-                            const getVal = (key: string) => {
-                                // loose match key
-                                const foundKey = Object.keys(item).find(k => k.toLowerCase().includes(key.toLowerCase()));
-                                return foundKey ? String(item[foundKey]) : null;
-                            };
-                            return mapRowToAthlete(getVal);
-                        });
-                    }
-                } else {
+                if (isExcel) {
                     // Handle Excel
                     if (typeof XLSX === 'undefined') {
                         throw new Error("XLSX library not loaded. Please refresh.");
                     }
-                    // For excel we need ArrayBuffer usually, but if readAsBinaryString was used:
-                    const workbook = XLSX.read(data, { type: file.name.toLowerCase().endsWith('.csv') ? 'string' : 'binary' });
+                    
+                    // Read data as array for robustness
+                    const workbook = XLSX.read(data, { type: 'array' });
                     const sheetName = workbook.SheetNames[0];
                     const sheet = workbook.Sheets[sheetName];
                     const json = XLSX.utils.sheet_to_json(sheet, { header: 1 }); 
                     
-                    if (json.length > 1) {
-                        const headers = (json[0] as any[]).map(h => String(h));
-                        const rows = json.slice(1) as any[][];
+                    if (json.length > 0) {
+                        const rows = json as any[][];
                         
-                        parsedData = rows.map((values) => {
+                        // Smart Header Detection: Find the row that likely contains headers (contains 'name' and 'date' or 'jh')
+                        let headerRowIndex = 0;
+                        for(let i=0; i < Math.min(rows.length, 10); i++) {
+                            const rowStr = rows[i].join(' ').toLowerCase();
+                            if (rowStr.includes('name') && (rowStr.includes('date') || rowStr.includes('jh') || rowStr.includes('metric'))) {
+                                headerRowIndex = i;
+                                break;
+                            }
+                        }
+
+                        const headers = (rows[headerRowIndex] as any[]).map(h => String(h));
+                        const dataRows = rows.slice(headerRowIndex + 1);
+                        
+                        parsedData = dataRows.map((values) => {
                             const getVal = (search: string) => {
                                 const idx = headers.findIndex(h => h.toLowerCase().includes(search.toLowerCase()));
                                 return idx !== -1 && values[idx] !== undefined ? String(values[idx]).trim() : null;
@@ -114,6 +113,31 @@ export const parseFile = (file: File): Promise<AthleteData[]> => {
                             return mapRowToAthlete(getVal);
                         }).filter(d => d.name && d.date && d.name !== 'Unknown');
                     }
+                } else if (file.name.toLowerCase().endsWith('.json')) {
+                    const textData = data as string;
+                    let jsonData = JSON.parse(textData);
+                    
+                    // Handle wrapped JSON e.g. { data: [...] }
+                    if (!Array.isArray(jsonData) && typeof jsonData === 'object') {
+                        const possibleArray = Object.values(jsonData).find(val => Array.isArray(val));
+                        if (possibleArray) {
+                            jsonData = possibleArray;
+                        }
+                    }
+
+                    if (Array.isArray(jsonData)) {
+                        parsedData = jsonData.map((item: any) => {
+                            const getVal = (key: string) => {
+                                // Loose key matching
+                                const foundKey = Object.keys(item).find(k => k.toLowerCase().includes(key.toLowerCase()));
+                                return foundKey ? String(item[foundKey]) : null;
+                            };
+                            return mapRowToAthlete(getVal);
+                        }).filter(d => d.name && d.date);
+                    }
+                } else {
+                    // CSV
+                    parsedData = parseCSV(data as string);
                 }
                 resolve(parsedData);
             } catch (err) {
@@ -122,10 +146,10 @@ export const parseFile = (file: File): Promise<AthleteData[]> => {
             }
         };
 
-        if (file.name.toLowerCase().endsWith('.csv') || file.name.toLowerCase().endsWith('.json')) {
-            reader.readAsText(file);
+        if (isExcel) {
+            reader.readAsArrayBuffer(file);
         } else {
-            reader.readAsBinaryString(file);
+            reader.readAsText(file);
         }
     });
 };
@@ -150,6 +174,39 @@ const convertToExportUrl = (url: string): string => {
     }
     return url;
 };
+
+// --- Google Sheet Backup Integration ---
+
+export const saveGoogleScriptUrl = (url: string) => {
+    localStorage.setItem(SCRIPT_URL_KEY, url);
+};
+
+export const getGoogleScriptUrl = () => {
+    return localStorage.getItem(SCRIPT_URL_KEY) || '';
+};
+
+export const backupToGoogleSheet = async (record: AthleteData): Promise<boolean> => {
+    const scriptUrl = getGoogleScriptUrl();
+    if (!scriptUrl) return false;
+
+    try {
+        // Send data as text/plain to avoid CORS preflight complications with GAS
+        await fetch(scriptUrl, {
+            method: 'POST',
+            mode: 'no-cors', // 'no-cors' is often required for GAS Web Apps called from client-side
+            headers: {
+                'Content-Type': 'text/plain',
+            },
+            body: JSON.stringify(record)
+        });
+        return true;
+    } catch (error) {
+        console.error("Backup to Google Sheet failed", error);
+        return false;
+    }
+};
+
+// --- End Google Sheet Integration ---
 
 // Manual Data Management
 export const addManualEntry = (entry: AthleteData) => {
