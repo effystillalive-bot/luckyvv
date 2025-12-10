@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Save, Plus, CheckCircle, Upload, FileText, AlertCircle, Database, Download } from 'lucide-react';
 import { METRICS } from '../constants';
-import { fetchData, addManualEntry, parseFile, batchAddManualEntries, backupToGoogleSheet, getManualEntries } from '../services/dataService';
+import { fetchData, addManualEntry, parseFile, batchAddManualEntries, backupToGoogleSheet, getManualEntries, syncBatchToGoogleSheet, getGoogleScriptUrl } from '../services/dataService';
 import { AthleteData } from '../types';
 
 declare const XLSX: any;
@@ -13,9 +13,10 @@ const DataInput: React.FC = () => {
   const [backupStatus, setBackupStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
 
   // Batch Import State
-  const [batchStatus, setBatchStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
+  const [batchStatus, setBatchStatus] = useState<'idle' | 'uploading' | 'syncing' | 'success' | 'error'>('idle');
   const [batchError, setBatchError] = useState('');
   const [batchCount, setBatchCount] = useState(0);
+  const [batchSyncProgress, setBatchSyncProgress] = useState({ current: 0, total: 0 });
 
   // Manual Form State
   const [isNewAthlete, setIsNewAthlete] = useState(false);
@@ -43,6 +44,8 @@ const DataInput: React.FC = () => {
       if (!file) return;
 
       setBatchStatus('uploading');
+      setBatchError('');
+      
       try {
           const parsedData = await parseFile(file);
           if (parsedData.length === 0) {
@@ -51,13 +54,26 @@ const DataInput: React.FC = () => {
               return;
           }
           
+          // 1. Save locally
           batchAddManualEntries(parsedData);
           setBatchCount(parsedData.length);
-          setBatchStatus('success');
           
-          // Refresh list to include any new athletes from batch
+          // Refresh list
           const uniqueNames = Array.from(new Set([...existingAthletes, ...parsedData.map(d => d.name)])).sort();
           setExistingAthletes(uniqueNames);
+
+          // 2. Sync to Cloud if configured
+          const scriptUrl = getGoogleScriptUrl();
+          if (scriptUrl) {
+              setBatchStatus('syncing');
+              setBatchSyncProgress({ current: 0, total: parsedData.length });
+              
+              await syncBatchToGoogleSheet(parsedData, (count) => {
+                  setBatchSyncProgress({ current: count, total: parsedData.length });
+              });
+          }
+          
+          setBatchStatus('success');
           
       } catch (err) {
           console.error(err);
@@ -294,7 +310,7 @@ const DataInput: React.FC = () => {
           </h2>
           <div className="bg-slate-950/50 rounded-lg border border-slate-700 border-dashed p-6 text-center">
               <p className="text-sm text-slate-400 mb-4">
-                  Upload CSV, Excel (.xlsx), or JSON files. Data will be merged with existing records.
+                  Upload CSV, Excel (.xlsx), or JSON files. Data will be merged with existing records and synced to Google Sheets (if enabled).
               </p>
               <input 
                   type="file" 
@@ -311,6 +327,23 @@ const DataInput: React.FC = () => {
               
               {batchStatus === 'uploading' && (
                   <div className="mt-4 text-primary-400 text-sm animate-pulse">Parsing file...</div>
+              )}
+
+              {batchStatus === 'syncing' && (
+                  <div className="mt-4 flex flex-col items-center">
+                      <div className="text-purple-400 text-sm animate-pulse font-medium mb-1">
+                          Syncing to Google Sheets...
+                      </div>
+                      <div className="w-64 h-2 bg-slate-800 rounded-full overflow-hidden">
+                          <div 
+                              className="h-full bg-purple-500 transition-all duration-300"
+                              style={{ width: `${(batchSyncProgress.current / batchSyncProgress.total) * 100}%` }}
+                          />
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">
+                          {batchSyncProgress.current} / {batchSyncProgress.total} records
+                      </div>
+                  </div>
               )}
               
               {batchStatus === 'success' && (

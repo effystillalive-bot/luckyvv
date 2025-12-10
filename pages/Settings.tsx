@@ -29,6 +29,12 @@ const Settings: React.FC = () => {
   };
 
   const handleScriptUrlSave = () => {
+    // Validate that it's a script url and not a sheet url
+    if (scriptUrl.includes('docs.google.com/spreadsheets')) {
+        alert("Warning: It looks like you pasted a Google Sheet URL. \n\nPlease paste the 'Web App URL' from the Apps Script deployment (starts with https://script.google.com/macros/s/...).");
+        return;
+    }
+    
     saveGoogleScriptUrl(scriptUrl);
     setScriptSaved(true);
     setTimeout(() => setScriptSaved(false), 2000);
@@ -118,7 +124,7 @@ const Settings: React.FC = () => {
                     <li>Paste the backup script (provided by your developer).</li>
                     <li>Click <strong>Deploy {'>'} New deployment {'>'} Web App</strong>.</li>
                     <li>Set "Who has access" to <strong>"Anyone"</strong>.</li>
-                    <li>Copy the URL and paste it below.</li>
+                    <li>Copy the URL (starts with script.google.com) and paste it below.</li>
                 </ol>
             </div>
 

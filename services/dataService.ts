@@ -207,6 +207,18 @@ export const backupToGoogleSheet = async (record: AthleteData): Promise<boolean>
     }
 };
 
+export const syncBatchToGoogleSheet = async (records: AthleteData[], onProgress?: (count: number) => void): Promise<void> => {
+    const scriptUrl = getGoogleScriptUrl();
+    if (!scriptUrl) return;
+
+    for (let i = 0; i < records.length; i++) {
+        await backupToGoogleSheet(records[i]);
+        if (onProgress) onProgress(i + 1);
+        // Small delay to be nice to GAS quotas and prevent 429 errors
+        await new Promise(r => setTimeout(r, 500));
+    }
+};
+
 // --- End Google Sheet Integration ---
 
 // Manual Data Management
