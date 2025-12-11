@@ -10,7 +10,6 @@ import {
   Tooltip,
   Legend
 } from 'recharts';
-import { format, parseISO } from 'date-fns';
 import { MetricDefinition } from '../types';
 
 interface ChartSectionProps {
@@ -21,11 +20,32 @@ interface ChartSectionProps {
   height?: number;
 }
 
+// Helper to format date string YYYY-MM-DD to MMM d, yyyy
+const formatDateLabel = (dateStr: string) => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  return dateStr;
+};
+
+// Helper to format date string YYYY-MM-DD to MM/dd
+const formatDateAxis = (dateStr: string) => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        return `${parts[1]}/${parts[2]}`;
+    }
+    return dateStr;
+}
+
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
       <div className="bg-slate-800 border border-slate-700 p-3 rounded shadow-xl text-xs">
-        <p className="text-slate-300 font-bold mb-2">{label ? format(parseISO(label), 'MMM d, yyyy') : ''}</p>
+        <p className="text-slate-300 font-bold mb-2">{label ? formatDateLabel(label) : ''}</p>
         {payload.map((entry: any, index: number) => (
           <div key={index} className="flex items-center gap-2 mb-1">
             <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
@@ -55,7 +75,7 @@ const ChartSection: React.FC<ChartSectionProps> = ({ title, data, metrics, type 
             <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
             <XAxis 
               dataKey="date" 
-              tickFormatter={(str) => format(parseISO(str), 'MM/dd')}
+              tickFormatter={formatDateAxis}
               stroke="#64748b"
               tick={{ fontSize: 12 }}
               tickMargin={10}

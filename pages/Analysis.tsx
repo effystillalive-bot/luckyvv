@@ -5,7 +5,6 @@ import { AthleteData } from '../types';
 import ChartSection from '../components/ChartSection';
 import MetricCard from '../components/MetricCard';
 import { METRICS } from '../constants';
-import { parseISO } from 'date-fns';
 
 declare const XLSX: any;
 declare const html2canvas: any;

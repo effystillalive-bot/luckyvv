@@ -9,6 +9,7 @@ const NOTES_KEY = 'proformance_notes';
 const ATHLETE_NOTES_KEY = 'proformance_athlete_notes';
 const ATHLETE_ORDER_KEY = 'proformance_athlete_order';
 const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwh9gkeMqsJQ_yfYABTBQGb1OE3RqLMfnzxmpJnvf_E_HyH7_jHuMD6zGb1m3JUM-I/exec';
+const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1476xvdLdcXzAyQio2WsXuii8ailSk7PNKfR_iLmu0WA/edit?gid=0#gid=0';
 
 // Declare XLSX globally as we load it via script tag
 declare const XLSX: any;
@@ -271,7 +272,7 @@ export const syncBatchToGoogleSheet = async (records: AthleteData[], onProgress?
 
 // Check if both Read and Write are configured for 2-way sync
 export const checkSyncStatus = (): { read: boolean, write: boolean } => {
-    const readUrl = localStorage.getItem(SETTINGS_KEY);
+    const readUrl = localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL;
     const writeUrl = getGoogleScriptUrl();
     return {
         read: !!(readUrl && readUrl.includes('google.com/spreadsheets')),
@@ -384,8 +385,8 @@ export const fetchData = async (): Promise<AthleteData[]> => {
           console.error("Failed to parse local data", e);
       }
   } else {
-    // 2. Priority: Google Sheet URL
-    let sheetUrl = localStorage.getItem(SETTINGS_KEY);
+    // 2. Priority: Google Sheet URL (User Setting OR Default)
+    let sheetUrl = localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL;
     let csvData = MOCK_DATA_CSV;
 
     if (sheetUrl && sheetUrl.includes('google.com/spreadsheets')) {
@@ -471,12 +472,13 @@ export const saveSheetUrl = (url: string) => {
 };
 
 export const getSheetUrl = () => {
-  return localStorage.getItem(SETTINGS_KEY) || '';
+  return localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL;
 };
 
 export const getDataSourceType = () => {
     if (localStorage.getItem(LOCAL_DATA_KEY)) return 'local_file';
     if (localStorage.getItem(SETTINGS_KEY)) return 'google_sheet';
+    if (DEFAULT_SHEET_URL) return 'google_sheet'; // Default is now Google Sheet
     return 'demo';
 };
 

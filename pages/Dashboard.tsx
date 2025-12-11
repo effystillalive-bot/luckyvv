@@ -13,11 +13,20 @@ import {
   Tooltip, 
   Legend 
 } from 'recharts';
-import { format, parseISO } from 'date-fns';
 import { fetchData } from '../services/dataService';
 import { AthleteData } from '../types';
 import ChartSection from '../components/ChartSection';
 import { METRICS } from '../constants';
+
+// Helper to format date string YYYY-MM-DD to MM/dd
+const formatDateAxis = (dateStr: string) => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        return `${parts[1]}/${parts[2]}`;
+    }
+    return dateStr;
+}
 
 const Dashboard: React.FC = () => {
   const [data, setData] = useState<AthleteData[]>([]);
@@ -332,7 +341,7 @@ const Dashboard: React.FC = () => {
                                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                                       <XAxis 
                                           dataKey="date" 
-                                          tickFormatter={(str) => format(parseISO(str), 'MM/dd')}
+                                          tickFormatter={formatDateAxis}
                                           stroke="#64748b"
                                           tick={{ fontSize: 11 }}
                                       />
@@ -340,7 +349,7 @@ const Dashboard: React.FC = () => {
                                       <Tooltip 
                                           contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }}
                                           itemStyle={{ fontSize: '12px' }}
-                                          labelFormatter={(label) => format(parseISO(label), 'yyyy-MM-dd')}
+                                          labelFormatter={(label) => label}
                                       />
                                       <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
                                       {selectedAthletes.map((id, index) => {
