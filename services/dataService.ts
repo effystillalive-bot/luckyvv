@@ -5,17 +5,16 @@ const SETTINGS_KEY = 'proformance_settings_sheet_url';
 const SCRIPT_URL_KEY = 'proformance_google_script_url'; 
 const LOCAL_DATA_KEY = 'proformance_local_data';
 const MANUAL_DATA_KEY = 'proformance_manual_data';
+const DELETED_DATA_KEY = 'proformance_deleted_data'; // New: Track deleted rows
+const BLOCKED_ATHLETES_KEY = 'proformance_blocked_athletes'; // New: Track deleted athletes
 const NOTES_KEY = 'proformance_notes';
 const ATHLETE_NOTES_KEY = 'proformance_athlete_notes';
 const ATHLETE_ORDER_KEY = 'proformance_athlete_order';
 const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwh9gkeMqsJQ_yfYABTBQGb1OE3RqLMfnzxmpJnvf_E_HyH7_jHuMD6zGb1m3JUM-I/exec';
-// User's specific sheet as default
 const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1476xvdLdcXzAyQio2WsXuii8ailSk7PNKfR_iLmu0WA/edit?gid=0#gid=0';
 
-// Declare XLSX globally as we load it via script tag
 declare const XLSX: any;
 
-// Helper: Convert Excel Serial Date to JS Date (YYYY-MM-DD)
 const excelDateToJSDate = (serial: number): string => {
    const utc_days  = Math.floor(serial - 25569);
    const utc_value = utc_days * 86400;                                        
@@ -23,32 +22,22 @@ const excelDateToJSDate = (serial: number): string => {
    return date_info.toISOString().split('T')[0];
 }
 
-// Helper: Normalize various date formats to YYYY-MM-DD
 const normalizeDate = (dateStr: string): string => {
     if (!dateStr) return new Date().toISOString().split('T')[0];
-    
-    // Handle Excel Serial
     if (!dateStr.includes('-') && !dateStr.includes('/') && !isNaN(Number(dateStr))) {
         return excelDateToJSDate(Number(dateStr));
     }
-
-    // Handle YYYY/MM/DD (Replace / with -)
     if (dateStr.includes('/')) {
         const parts = dateStr.split('/');
-        // Check if YYYY/MM/DD or MM/DD/YYYY based on year length
         if (parts[0].length === 4) {
              return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
         }
     }
-    
     return dateStr;
 };
 
-// Helper to map a row (array of values) to AthleteData using a getter function for headers
 const mapRowToAthlete = (getVal: (search: string[]) => string | null, nameFallback: string | null): AthleteData => {
-  // Try finding name with standard keys, otherwise use the fallback (usually Col 0)
   const name = getVal(['name', '姓名', 'athlete']) || nameFallback || 'Unknown';
-  
   let dateRaw = getVal(['date', '日期', 'time']);
   let date = normalizeDate(dateRaw || '');
 
@@ -72,15 +61,11 @@ const mapRowToAthlete = (getVal: (search: string[]) => string | null, nameFallba
   };
 };
 
-// Helper to parse CSV string into objects
 const parseCSV = (csvText: string): AthleteData[] => {
-  // Security check: If response is HTML, it's likely a login page or 403 error
   if (!csvText || csvText.trim().startsWith('<!DOCTYPE') || csvText.trim().startsWith('<html')) {
-      console.warn("CSV content appears to be HTML (likely login page or error).");
       return [];
   }
 
-  // Robust CSV parsing using XLSX
   if (typeof XLSX !== 'undefined') {
       try {
           const workbook = XLSX.read(csvText, { type: 'string' });
@@ -90,11 +75,9 @@ const parseCSV = (csvText: string): AthleteData[] => {
           
           if (json.length > 0) {
               const rows = json as any[][];
-              // Smart Header Detection
               let headerRowIndex = 0;
               for(let i=0; i < Math.min(rows.length, 10); i++) {
                  const rowStr = rows[i].join(' ').toLowerCase();
-                 // Relaxed check: look for 'date' OR 'jh' OR 'jump' to identify header
                  if (rowStr.includes('date') || rowStr.includes('日期') || rowStr.includes('jh') || rowStr.includes('jump')) {
                      headerRowIndex = i;
                      break;
@@ -106,14 +89,12 @@ const parseCSV = (csvText: string): AthleteData[] => {
 
               return dataRows.map((values) => {
                   const getVal = (searchKeys: string[]) => {
-                      // Find index of header that contains any of the search keys
                       const idx = headers.findIndex(h => 
                           searchKeys.some(key => h.toLowerCase().includes(key.toLowerCase()))
                       );
                       return idx !== -1 && values[idx] !== undefined ? String(values[idx]).trim() : null;
                   };
 
-                  // Fallback for Name: If 'name' header not found, assume Column 0
                   let nameFallback = null;
                   const nameHeaderExists = headers.some(h => h.toLowerCase().includes('name') || h.toLowerCase().includes('姓名'));
                   if (!nameHeaderExists && values[0]) {
@@ -127,11 +108,9 @@ const parseCSV = (csvText: string): AthleteData[] => {
           console.error("XLSX parse error on CSV", e);
       }
   }
-
   return [];
 };
 
-// Generic File Parser
 export const parseFile = (file: File): Promise<AthleteData[]> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -141,8 +120,6 @@ export const parseFile = (file: File): Promise<AthleteData[]> => {
             try {
                 const data = e.target?.result;
                 let parsedData: AthleteData[] = [];
-                // Implementation similar to parseCSV but handles binary Excel
-                // reusing parseCSV logic for text based CSV
                 if (!isExcel) {
                     parsedData = parseCSV(data as string);
                 } else {
@@ -177,28 +154,19 @@ export const clearLocalData = () => {
   localStorage.removeItem(LOCAL_DATA_KEY);
 };
 
-// Helper to convert Google Sheet URL to CSV Export URL via GVIZ
 const convertToExportUrl = (url: string): string => {
     if (!url) return '';
     if (url.includes('tqx=out:csv')) return url;
-
-    // Extract ID
     const idMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
     if (!idMatch || !idMatch[1]) return url;
     const id = idMatch[1];
-
-    // Extract GID
     let gid = '0';
     const queryGidMatch = url.match(/[?&]gid=([0-9]+)/);
     const hashGidMatch = url.match(/#gid=([0-9]+)/);
     if (queryGidMatch) gid = queryGidMatch[1];
     else if (hashGidMatch) gid = hashGidMatch[1];
-
-    // Use Google Visualization API for best CORS/CSV support
     return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&gid=${gid}`;
 };
-
-// --- Google Sheet Backup Integration ---
 
 export const saveGoogleScriptUrl = (url: string) => {
     localStorage.setItem(SCRIPT_URL_KEY, url);
@@ -211,16 +179,12 @@ export const getGoogleScriptUrl = () => {
 export const backupToGoogleSheet = async (record: AthleteData): Promise<boolean> => {
     const scriptUrl = getGoogleScriptUrl();
     if (!scriptUrl) return false;
-
     try {
-        // Clean the record to ensure no undefined values are sent
-        // which might cause Google Script to write empty cells/rows improperly
         const cleanRecord = JSON.parse(JSON.stringify(record));
-        
         await fetch(scriptUrl, {
             method: 'POST',
             mode: 'no-cors',
-            headers: { 'Content-Type': 'text/plain' }, // text/plain avoids preflight OPTIONS
+            headers: { 'Content-Type': 'text/plain' },
             body: JSON.stringify(cleanRecord)
         });
         return true;
@@ -234,7 +198,7 @@ export const syncBatchToGoogleSheet = async (records: AthleteData[], onProgress?
     for (let i = 0; i < records.length; i++) {
         await backupToGoogleSheet(records[i]);
         if (onProgress) onProgress(i + 1);
-        await new Promise(r => setTimeout(r, 600)); // Slight delay to prevent rate limits
+        await new Promise(r => setTimeout(r, 600)); 
     }
 };
 
@@ -247,8 +211,6 @@ export const checkSyncStatus = (): { read: boolean, write: boolean } => {
     };
 };
 
-// --- Manual Data Management ---
-
 export const getManualEntries = (): AthleteData[] => {
     const str = localStorage.getItem(MANUAL_DATA_KEY);
     return str ? JSON.parse(str) : [];
@@ -256,10 +218,14 @@ export const getManualEntries = (): AthleteData[] => {
 
 export const addManualEntry = (entry: AthleteData) => {
     const current = getManualEntries();
-    // Remove existing if matching ID and Date (Upsert)
     const filtered = current.filter(d => !(d.id === entry.id && d.date === entry.date));
     filtered.push(entry);
     localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(filtered));
+    
+    // If we are adding back an entry that was previously deleted, remove it from the deleted list
+    const deleted = getDeletedEntries();
+    const newDeleted = deleted.filter(d => !(d.id === entry.id && d.date === entry.date));
+    localStorage.setItem(DELETED_DATA_KEY, JSON.stringify(newDeleted));
 };
 
 export const batchAddManualEntries = (entries: AthleteData[]) => {
@@ -279,17 +245,37 @@ export const clearManualData = () => {
     localStorage.removeItem(MANUAL_DATA_KEY);
 };
 
+// --- Deletion Logic with Soft Deletes (Tombstones) ---
+
+export const getDeletedEntries = (): {id: string, date: string}[] => {
+    const str = localStorage.getItem(DELETED_DATA_KEY);
+    return str ? JSON.parse(str) : [];
+}
+
+export const getBlockedAthletes = (): string[] => {
+    const str = localStorage.getItem(BLOCKED_ATHLETES_KEY);
+    return str ? JSON.parse(str) : [];
+}
+
 export const deleteSpecificEntry = (id: string, date: string) => {
+    // 1. Remove from Manual (override)
     const current = getManualEntries();
     const filtered = current.filter(d => !(d.id === id && d.date === date));
     localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(filtered));
     
-    // Also remove from local data cache if present
+    // 2. Remove from Local File Data (if uploaded)
     const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
     if (localDataStr) {
         let localData = JSON.parse(localDataStr) as AthleteData[];
         localData = localData.filter(d => !(d.id === id && d.date === date));
         localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(localData));
+    }
+
+    // 3. Mark as Deleted (Soft Delete) to hide from Google Sheet data
+    const deleted = getDeletedEntries();
+    if (!deleted.some(d => d.id === id && d.date === date)) {
+        deleted.push({ id, date });
+        localStorage.setItem(DELETED_DATA_KEY, JSON.stringify(deleted));
     }
 };
 
@@ -299,7 +285,7 @@ export const deleteAthleteProfile = (id: string) => {
     const filteredManual = currentManual.filter(d => d.id !== id);
     localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(filteredManual));
 
-    // 2. Remove from Local File Data (if applicable)
+    // 2. Remove from Local File Data
     const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
     if (localDataStr) {
         let localData = JSON.parse(localDataStr) as AthleteData[];
@@ -325,6 +311,13 @@ export const deleteAthleteProfile = (id: string) => {
     const order = getAthleteOrder();
     const newOrder = order.filter(oid => oid !== id);
     saveAthleteOrder(newOrder);
+
+    // 6. Block Athlete (Soft Delete for Sheet Data)
+    const blocked = getBlockedAthletes();
+    if (!blocked.includes(id)) {
+        blocked.push(id);
+        localStorage.setItem(BLOCKED_ATHLETES_KEY, JSON.stringify(blocked));
+    }
 };
 
 export const saveAthleteOrder = (order: string[]) => {
@@ -336,12 +329,9 @@ export const getAthleteOrder = (): string[] => {
     return str ? JSON.parse(str) : [];
 };
 
-// --- Data Fetching ---
-
 export const fetchData = async (): Promise<AthleteData[]> => {
   let baseData: AthleteData[] = [];
   
-  // Always prioritize Google Sheets to ensure sync
   const userSettingUrl = localStorage.getItem(SETTINGS_KEY);
   const targetUrl = userSettingUrl || DEFAULT_SHEET_URL;
 
@@ -351,16 +341,11 @@ export const fetchData = async (): Promise<AthleteData[]> => {
       try {
           const fetchUrl = convertToExportUrl(targetUrl);
           const separator = fetchUrl.includes('?') ? '&' : '?';
-          // Use simple timestamp cache buster
           const finalUrl = `${fetchUrl}${separator}t=${new Date().getTime()}`;
-
-          console.log("Fetching from GVIZ:", finalUrl);
           
           const response = await fetch(finalUrl);
-          
           if (response.ok) {
               const text = await response.text();
-              // Validate content is not HTML
               if (!text.trim().startsWith('<')) {
                   const parsed = parseCSV(text);
                   if (parsed.length > 0) {
@@ -374,7 +359,6 @@ export const fetchData = async (): Promise<AthleteData[]> => {
       }
   }
 
-  // Fallback to local only if sheet failed
   if (!sheetLoaded) {
       const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
       if (localDataStr) {
@@ -382,31 +366,39 @@ export const fetchData = async (): Promise<AthleteData[]> => {
       }
   }
   
-  // Mock fallback
   if (baseData.length === 0 && !sheetLoaded) {
       baseData = parseCSV(MOCK_DATA_CSV);
   }
 
-  // Merge Manual Data
+  // Merge Data
   const manualData = getManualEntries();
   const dataMap = new Map<string, AthleteData>();
   
   baseData.forEach(d => dataMap.set(`${d.id}_${d.date}`, d));
   manualData.forEach(d => dataMap.set(`${d.id}_${d.date}`, d)); 
   
-  const mergedData = Array.from(dataMap.values());
+  // Filter out Deleted Data
+  const deletedEntries = getDeletedEntries();
+  const blockedAthletes = getBlockedAthletes();
+  
   const notes = getNotes();
 
-  return mergedData.map(record => {
-    const uniqueKey = `${record.id}_${record.date}`;
-    return {
-      ...record,
-      note: notes[uniqueKey] || record.note || ''
-    };
-  });
+  return Array.from(dataMap.values())
+    .filter(record => {
+        // Check if athlete is blocked
+        if (blockedAthletes.includes(record.id)) return false;
+        // Check if specific row is deleted
+        if (deletedEntries.some(del => del.id === record.id && del.date === record.date)) return false;
+        return true;
+    })
+    .map(record => {
+        const uniqueKey = `${record.id}_${record.date}`;
+        return {
+          ...record,
+          note: notes[uniqueKey] || record.note || ''
+        };
+    });
 };
-
-// --- Misc Helpers ---
 
 export const testGoogleSheetConnection = async (url: string): Promise<{success: boolean, message: string, count: number}> => {
     if (!url) return { success: false, message: "No URL provided", count: 0 };
