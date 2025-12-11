@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Search, Save, FileText, Calendar, User, ChevronLeft, ChevronRight, FileSpreadsheet, Download, FileJson, Trash2, GripVertical, Settings2, Check, Plus, X, Activity, RefreshCw } from 'lucide-react';
+import { Search, Save, FileText, Calendar, User, ChevronLeft, ChevronRight, FileSpreadsheet, Download, FileJson, Trash2, GripVertical, Settings2, Check, Plus, X, Activity, RefreshCw, Edit2, XCircle } from 'lucide-react';
 import { fetchData, saveNote, saveAthleteNote, getAthleteNotes, deleteSpecificEntry, deleteAthleteProfile, saveAthleteOrder, getAthleteOrder, addManualEntry, backupToGoogleSheet } from '../services/dataService';
 import { AthleteData } from '../types';
 import ChartSection from '../components/ChartSection';
@@ -31,6 +31,11 @@ const Analysis: React.FC = () => {
   const [athleteNote, setAthleteNote] = useState<string>('');
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isSyncingNote, setIsSyncingNote] = useState(false);
+
+  // Row Editing State (Full Record)
+  const [editingRow, setEditingRow] = useState<string | null>(null); // Key: id_date
+  const [editForm, setEditForm] = useState<AthleteData | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   
   // Sorting State
   const [athleteOrder, setAthleteOrder] = useState<string[]>([]);
@@ -82,14 +87,14 @@ const Analysis: React.FC = () => {
 
     // Auto-refresh Polling (every 5 minutes)
     const interval = setInterval(() => {
-        // Only refresh if not actively dragging or in modal to avoid jitter
-        if (!isAddModalOpen && !draggedItemIndex) {
+        // Only refresh if not actively dragging or in modal/editing to avoid jitter
+        if (!isAddModalOpen && !draggedItemIndex && !editingRow) {
             loadData(true);
         }
     }, 300000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [editingRow, isAddModalOpen, draggedItemIndex]);
 
   // Sync Athlete General Note
   useEffect(() => {
@@ -147,6 +152,66 @@ const Analysis: React.FC = () => {
     });
   }, [rawData, selectedAthleteId, dateRange]);
 
+  // --- Row Editing Handlers ---
+
+  const handleStartEdit = (record: AthleteData) => {
+    setEditingRow(`${record.id}_${record.date}`);
+    setEditForm({ ...record });
+    // Cancel any single note edit
+    setEditingNote(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingRow(null);
+    setEditForm(null);
+  };
+
+  const handleEditChange = (key: keyof AthleteData, value: string) => {
+    if (!editForm) return;
+    setEditForm(prev => {
+        if (!prev) return null;
+        if (key === 'note') {
+            return { ...prev, note: value };
+        } else if (key === 'name' || key === 'id' || key === 'date') {
+             return { ...prev, [key]: value };
+        } else {
+            return { ...prev, [key]: parseFloat(value) || 0 };
+        }
+    });
+  };
+
+  const handleSaveEdit = async () => {
+      if (!editForm) return;
+      setIsSavingEdit(true);
+
+      // 1. Save Local (Manual Entry Overrides)
+      addManualEntry(editForm);
+      
+      // 2. Explicitly Save Note if changed (Since notes have separate storage priority)
+      if (editForm.note !== undefined) {
+          saveNote(editForm.id, editForm.date, editForm.note);
+      }
+
+      // 3. Backup to Google Sheet (Cloud Sync)
+      // This appends the updated record to the sheet log
+      await backupToGoogleSheet(editForm);
+
+      // 4. Update UI State Optimistically
+      const newData = [...rawData];
+      const idx = newData.findIndex(d => d.id === editForm.id && d.date === editForm.date);
+      if (idx !== -1) {
+          newData[idx] = editForm;
+      } else {
+          newData.push(editForm);
+          newData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      }
+      setRawData(newData);
+
+      setIsSavingEdit(false);
+      setEditingRow(null);
+      setEditForm(null);
+  };
+
   // --- Deletion Handlers ---
 
   const handleDeleteRecord = async (record: AthleteData) => {
@@ -176,20 +241,14 @@ const Analysis: React.FC = () => {
   const handleDragEnter = (index: number) => {
       if (draggedItemIndex === null || draggedItemIndex === index) return;
       
-      // Reorder the filteredAthletes array temporarily in UI
       const newAthletes = [...filteredAthletes];
       const draggedItem = newAthletes[draggedItemIndex];
       newAthletes.splice(draggedItemIndex, 1);
       newAthletes.splice(index, 0, draggedItem);
       
-      // We need to update the source of truth (Order ID List)
-      // Extract IDs from the new visual order
       const newOrderIds = newAthletes.map(a => a.id);
-      
-      // Merge with any IDs that might be hidden by search filter (append them at end)
       const visibleIds = new Set(newOrderIds);
       const hiddenIds = athleteOrder.filter(id => !visibleIds.has(id));
-      
       const finalOrder = [...newOrderIds, ...hiddenIds];
       
       setAthleteOrder(finalOrder);
@@ -201,14 +260,12 @@ const Analysis: React.FC = () => {
       saveAthleteOrder(athleteOrder);
   };
 
-  // --- Note Saving ---
+  // --- Note Saving (Single Cell) ---
 
   const handleNoteSave = async (record: AthleteData, text: string) => {
     setIsSyncingNote(true);
-    // 1. Save locally for immediate UI update
     saveNote(record.id, record.date, text);
     
-    // 2. Optimistic update of state
     const newData = [...rawData];
     const idx = newData.findIndex(d => d.id === record.id && d.date === record.date);
     if (idx !== -1) {
@@ -216,7 +273,6 @@ const Analysis: React.FC = () => {
         setRawData(newData);
     }
     
-    // 3. Sync to Google Sheet (Backup complete record with new note)
     const updatedRecord = { ...record, note: text };
     await backupToGoogleSheet(updatedRecord);
     
@@ -271,15 +327,10 @@ const Analysis: React.FC = () => {
           note: '' // Note can be added via table later
       };
 
-      // 1. Save Local
       addManualEntry(newRecord);
-      
-      // 2. Cloud Backup
       await backupToGoogleSheet(newRecord);
 
-      // 3. Update State (Optimistic)
       const newData = [...rawData];
-      // Remove existing if overwriting same date
       const existingIdx = newData.findIndex(d => d.id === newRecord.id && d.date === newRecord.date);
       if (existingIdx !== -1) {
           newData[existingIdx] = newRecord;
@@ -300,7 +351,6 @@ const Analysis: React.FC = () => {
 
     const currentName = athletes.find(a => a.id === selectedAthleteId)?.name || 'Athlete';
     
-    // Build CSV Content
     const csvRows = [];
     csvRows.push(`Athlete Name,${currentName}`);
     csvRows.push(`Export Date,${new Date().toISOString().split('T')[0]}`);
@@ -647,8 +697,8 @@ const Analysis: React.FC = () => {
                     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg mb-8">
                         <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900">
                             <h3 className="text-lg font-semibold text-white">Historical Data Log</h3>
-                            <div className="flex items-center gap-3 no-export">
-                                <span className="text-xs text-slate-500 hidden sm:inline">Editable Notes</span>
+                            <div className="flex items-center gap-3 no-export text-xs text-slate-500">
+                                <span>Edit directly to update local & cloud data</span>
                             </div>
                         </div>
                         <div className="overflow-x-auto">
@@ -660,62 +710,122 @@ const Analysis: React.FC = () => {
                                             <th key={m.key} className="px-4 py-3 whitespace-nowrap" style={{ color: m.color }}>{m.label}</th>
                                         ))}
                                         <th className="px-4 py-3 min-w-[200px]">Coach Note</th>
-                                        <th className="px-4 py-3 w-10 no-export"></th>
+                                        <th className="px-4 py-3 min-w-[80px] no-export text-center">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-800">
-                                    {[...filteredData].reverse().map((record) => (
-                                        <tr key={`${record.id}-${record.date}`} className="hover:bg-slate-800/50 transition-colors group/row">
-                                            <td className="px-4 py-3 font-mono sticky left-0 bg-slate-900 z-10 border-r border-slate-800 text-slate-300 font-medium">{record.date}</td>
-                                            {METRICS.map(m => (
-                                                <td key={m.key} className="px-4 py-3 text-slate-300 tabular-nums">
-                                                    {(record[m.key] as number).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                    {[...filteredData].reverse().map((record) => {
+                                        const recordKey = `${record.id}_${record.date}`;
+                                        const isEditing = editingRow === recordKey;
+
+                                        return (
+                                            <tr key={recordKey} className={`hover:bg-slate-800/50 transition-colors group/row ${isEditing ? 'bg-slate-800/80' : ''}`}>
+                                                <td className="px-4 py-3 font-mono sticky left-0 bg-slate-900 z-10 border-r border-slate-800 text-slate-300 font-medium">
+                                                    {record.date}
                                                 </td>
-                                            ))}
-                                            <td className="px-4 py-3">
-                                                {editingNote?.id === record.id && editingNote?.date === record.date ? (
-                                                    <div className="flex gap-2">
-                                                        <input 
-                                                            autoFocus
-                                                            className="bg-slate-950 border border-slate-700 rounded px-2 py-1 w-full text-white outline-none focus:border-primary-500 text-xs"
-                                                            value={editingNote.text}
-                                                            onChange={(e) => setEditingNote({...editingNote, text: e.target.value})}
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter') handleNoteSave(record, editingNote.text);
-                                                                if (e.key === 'Escape') setEditingNote(null);
-                                                            }}
-                                                        />
-                                                        <button 
-                                                            onClick={() => handleNoteSave(record, editingNote.text)}
-                                                            className="bg-emerald-500/20 text-emerald-500 p-1 rounded hover:bg-emerald-500/30"
-                                                        >
-                                                            {isSyncingNote ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <div 
-                                                        className="cursor-pointer hover:bg-slate-800 p-1.5 -m-1.5 rounded transition-colors group min-h-[24px] flex items-center"
-                                                        onClick={() => setEditingNote({ id: record.id, date: record.date, text: record.note || '' })}
-                                                    >
-                                                        {record.note ? (
-                                                            <span className="text-slate-300 text-xs">{record.note}</span>
+                                                {METRICS.map(m => (
+                                                    <td key={m.key} className="px-4 py-3 text-slate-300 tabular-nums">
+                                                        {isEditing && editForm ? (
+                                                            <input
+                                                                type="number"
+                                                                step="0.01"
+                                                                className="w-20 bg-slate-950 border border-slate-600 rounded px-2 py-1 text-white text-xs outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+                                                                value={editForm[m.key] || 0}
+                                                                onChange={(e) => handleEditChange(m.key, e.target.value)}
+                                                            />
                                                         ) : (
-                                                            <span className="text-slate-700 text-xs italic group-hover:text-slate-500">+ Add note</span>
+                                                            (record[m.key] as number).toLocaleString(undefined, { maximumFractionDigits: 2 })
+                                                        )}
+                                                    </td>
+                                                ))}
+                                                <td className="px-4 py-3">
+                                                    {isEditing && editForm ? (
+                                                        <input 
+                                                            className="bg-slate-950 border border-slate-600 rounded px-2 py-1 w-full text-white outline-none focus:border-primary-500 text-xs"
+                                                            value={editForm.note || ''}
+                                                            onChange={(e) => handleEditChange('note', e.target.value)}
+                                                            placeholder="Add note..."
+                                                        />
+                                                    ) : (
+                                                        /* Inline Quick Edit (Single Cell) Logic for non-edit mode */
+                                                        editingNote?.id === record.id && editingNote?.date === record.date ? (
+                                                            <div className="flex gap-2">
+                                                                <input 
+                                                                    autoFocus
+                                                                    className="bg-slate-950 border border-slate-700 rounded px-2 py-1 w-full text-white outline-none focus:border-primary-500 text-xs"
+                                                                    value={editingNote.text}
+                                                                    onChange={(e) => setEditingNote({...editingNote, text: e.target.value})}
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') handleNoteSave(record, editingNote.text);
+                                                                        if (e.key === 'Escape') setEditingNote(null);
+                                                                    }}
+                                                                />
+                                                                <button 
+                                                                    onClick={() => handleNoteSave(record, editingNote.text)}
+                                                                    className="bg-emerald-500/20 text-emerald-500 p-1 rounded hover:bg-emerald-500/30"
+                                                                >
+                                                                    {isSyncingNote ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <div 
+                                                                className="cursor-pointer hover:bg-slate-800 p-1.5 -m-1.5 rounded transition-colors group min-h-[24px] flex items-center"
+                                                                onClick={() => setEditingNote({ id: record.id, date: record.date, text: record.note || '' })}
+                                                                title="Click to add note quickly"
+                                                            >
+                                                                {record.note ? (
+                                                                    <span className="text-slate-300 text-xs">{record.note}</span>
+                                                                ) : (
+                                                                    <span className="text-slate-700 text-xs italic group-hover:text-slate-500">+ Note</span>
+                                                                )}
+                                                            </div>
+                                                        )
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-center no-export">
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        {isEditing ? (
+                                                            <>
+                                                                <button 
+                                                                    onClick={handleSaveEdit}
+                                                                    disabled={isSavingEdit}
+                                                                    className="text-emerald-500 hover:text-emerald-400 p-1 rounded hover:bg-emerald-500/10 transition-colors"
+                                                                    title="Save Changes"
+                                                                >
+                                                                    {isSavingEdit ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Check className="w-4 h-4" />}
+                                                                </button>
+                                                                <button 
+                                                                    onClick={handleCancelEdit}
+                                                                    disabled={isSavingEdit}
+                                                                    className="text-slate-500 hover:text-white p-1 rounded hover:bg-slate-700 transition-colors"
+                                                                    title="Cancel"
+                                                                >
+                                                                    <X className="w-4 h-4" />
+                                                                </button>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <button 
+                                                                    onClick={() => handleStartEdit(record)}
+                                                                    className="text-slate-500 hover:text-primary-400 p-1 rounded hover:bg-primary-500/10 transition-colors"
+                                                                    title="Edit Record"
+                                                                >
+                                                                    <Edit2 className="w-4 h-4" />
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => handleDeleteRecord(record)}
+                                                                    className="text-slate-600 hover:text-rose-500 transition-colors p-1 rounded hover:bg-rose-500/10"
+                                                                    title="Delete Record"
+                                                                >
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </button>
+                                                            </>
                                                         )}
                                                     </div>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 text-center no-export">
-                                                <button 
-                                                    onClick={() => handleDeleteRecord(record)}
-                                                    className="text-slate-600 hover:text-rose-500 transition-colors opacity-0 group-hover/row:opacity-100"
-                                                    title="Delete this record"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
