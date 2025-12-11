@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Search, Save, FileText, Calendar, User, ChevronLeft, ChevronRight, FileSpreadsheet, Download, FileJson, Trash2, GripVertical, Settings2, Check } from 'lucide-react';
-import { fetchData, saveNote, saveAthleteNote, getAthleteNotes, deleteSpecificEntry, deleteAthleteProfile, saveAthleteOrder, getAthleteOrder } from '../services/dataService';
+import { Search, Save, FileText, Calendar, User, ChevronLeft, ChevronRight, FileSpreadsheet, Download, FileJson, Trash2, GripVertical, Settings2, Check, Plus, X, Activity, RefreshCw } from 'lucide-react';
+import { fetchData, saveNote, saveAthleteNote, getAthleteNotes, deleteSpecificEntry, deleteAthleteProfile, saveAthleteOrder, getAthleteOrder, addManualEntry, backupToGoogleSheet } from '../services/dataService';
 import { AthleteData } from '../types';
 import ChartSection from '../components/ChartSection';
 import MetricCard from '../components/MetricCard';
@@ -28,10 +28,17 @@ const Analysis: React.FC = () => {
   const [editingNote, setEditingNote] = useState<{id: string, date: string, text: string} | null>(null);
   const [athleteNote, setAthleteNote] = useState<string>('');
   const [isSavingNote, setIsSavingNote] = useState(false);
+  const [isSyncingNote, setIsSyncingNote] = useState(false);
   
   // Sorting State
   const [athleteOrder, setAthleteOrder] = useState<string[]>([]);
   const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
+  
+  // Add Data Modal State
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newEntryDate, setNewEntryDate] = useState(new Date().toISOString().split('T')[0]);
+  const [newEntryMetrics, setNewEntryMetrics] = useState<Record<string, number>>({});
+  const [isSavingNewEntry, setIsSavingNewEntry] = useState(false);
   
   const contentRef = useRef<HTMLDivElement>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
@@ -176,15 +183,24 @@ const Analysis: React.FC = () => {
 
   // --- Note Saving ---
 
-  const handleNoteSave = (record: AthleteData, text: string) => {
+  const handleNoteSave = async (record: AthleteData, text: string) => {
+    setIsSyncingNote(true);
+    // 1. Save locally for immediate UI update
     saveNote(record.id, record.date, text);
-    // Optimistic update
+    
+    // 2. Optimistic update of state
     const newData = [...rawData];
     const idx = newData.findIndex(d => d.id === record.id && d.date === record.date);
     if (idx !== -1) {
         newData[idx] = { ...newData[idx], note: text };
         setRawData(newData);
     }
+    
+    // 3. Sync to Google Sheet (Backup complete record with new note)
+    const updatedRecord = { ...record, note: text };
+    await backupToGoogleSheet(updatedRecord);
+    
+    setIsSyncingNote(false);
     setEditingNote(null);
   };
 
@@ -194,6 +210,67 @@ const Analysis: React.FC = () => {
           saveAthleteNote(selectedAthleteId, athleteNote);
           setTimeout(() => setIsSavingNote(false), 500);
       }
+  };
+
+  // --- Add Data Logic ---
+  
+  const handleOpenAddModal = () => {
+      setNewEntryDate(new Date().toISOString().split('T')[0]);
+      setNewEntryMetrics({});
+      setIsAddModalOpen(true);
+  };
+
+  const handleNewEntryMetricChange = (key: string, value: string) => {
+      setNewEntryMetrics(prev => ({
+          ...prev,
+          [key]: parseFloat(value) || 0
+      }));
+  };
+
+  const handleSaveNewEntry = async (e: React.FormEvent) => {
+      e.preventDefault();
+      const currentAthlete = athletes.find(a => a.id === selectedAthleteId);
+      if (!currentAthlete) return;
+
+      setIsSavingNewEntry(true);
+
+      const newRecord: AthleteData = {
+          id: selectedAthleteId,
+          name: currentAthlete.name,
+          date: newEntryDate,
+          jh: newEntryMetrics['jh'] || 0,
+          avgPropulsiveForce: newEntryMetrics['avgPropulsiveForce'] || 0,
+          peakPropulsiveForce: newEntryMetrics['peakPropulsiveForce'] || 0,
+          peakPropulsivePower: newEntryMetrics['peakPropulsivePower'] || 0,
+          propulsiveRfdSj: newEntryMetrics['propulsiveRfdSj'] || 0,
+          mrsi: newEntryMetrics['mrsi'] || 0,
+          timeToTakeoff: newEntryMetrics['timeToTakeoff'] || 0,
+          brakingRfdCmj: newEntryMetrics['brakingRfdCmj'] || 0,
+          rsiDj: newEntryMetrics['rsiDj'] || 0,
+          lrPeakBrakingForceDiff: newEntryMetrics['lrPeakBrakingForceDiff'] || 0,
+          note: '' // Note can be added via table later
+      };
+
+      // 1. Save Local
+      addManualEntry(newRecord);
+      
+      // 2. Cloud Backup
+      await backupToGoogleSheet(newRecord);
+
+      // 3. Update State (Optimistic)
+      const newData = [...rawData];
+      // Remove existing if overwriting same date
+      const existingIdx = newData.findIndex(d => d.id === newRecord.id && d.date === newRecord.date);
+      if (existingIdx !== -1) {
+          newData[existingIdx] = newRecord;
+      } else {
+          newData.push(newRecord);
+          newData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      }
+      setRawData(newData);
+
+      setIsSavingNewEntry(false);
+      setIsAddModalOpen(false);
   };
 
   // --- Export ---
@@ -412,7 +489,19 @@ const Analysis: React.FC = () => {
                      </h2>
                 </div>
                 
-                <div className="flex flex-nowrap items-center gap-2 lg:gap-3 overflow-x-auto">
+                <div className="flex flex-nowrap items-center gap-2 lg:gap-3 overflow-x-auto w-full lg:w-auto">
+                    {/* Add Data Button */}
+                    {currentRecord && (
+                        <button 
+                            onClick={handleOpenAddModal}
+                            className="flex items-center gap-2 bg-primary-600 hover:bg-primary-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors no-export shrink-0 shadow-lg shadow-primary-900/20"
+                            title="Add Data Record"
+                        >
+                            <Plus className="w-4 h-4" />
+                            <span className="hidden sm:inline">Add Data</span>
+                        </button>
+                    )}
+
                     <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm no-export shrink-0">
                         <Calendar className="w-4 h-4 text-primary-500" />
                         <input 
@@ -565,7 +654,7 @@ const Analysis: React.FC = () => {
                                                             onClick={() => handleNoteSave(record, editingNote.text)}
                                                             className="bg-emerald-500/20 text-emerald-500 p-1 rounded hover:bg-emerald-500/30"
                                                         >
-                                                            <Save className="w-3 h-3" />
+                                                            {isSyncingNote ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
                                                         </button>
                                                     </div>
                                                 ) : (
@@ -632,6 +721,113 @@ const Analysis: React.FC = () => {
             )}
          </div>
       </div>
+
+      {/* ADD DATA MODAL */}
+      {isAddModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm no-export">
+              <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                  {/* Modal Header */}
+                  <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                      <div>
+                          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                             <Activity className="w-5 h-5 text-primary-500" />
+                             Add Data Record
+                          </h2>
+                          <p className="text-xs text-slate-400">
+                             Adding data for <span className="text-white font-medium">{athletes.find(a => a.id === selectedAthleteId)?.name}</span>
+                          </p>
+                      </div>
+                      <button 
+                          onClick={() => setIsAddModalOpen(false)}
+                          className="text-slate-500 hover:text-white transition-colors"
+                      >
+                          <X className="w-6 h-6" />
+                      </button>
+                  </div>
+                  
+                  {/* Modal Body (Scrollable) */}
+                  <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                       <form id="addDataForm" onSubmit={handleSaveNewEntry}>
+                           <div className="mb-6">
+                               <label className="block text-sm font-medium text-slate-300 mb-2">Date</label>
+                               <input 
+                                   type="date" 
+                                   required
+                                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none"
+                                   value={newEntryDate}
+                                   onChange={e => setNewEntryDate(e.target.value)}
+                               />
+                           </div>
+                           
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                               {/* Performance Column */}
+                               <div>
+                                   <h3 className="text-xs font-bold text-primary-500 uppercase tracking-wider mb-3 pb-1 border-b border-slate-800">
+                                       Performance
+                                   </h3>
+                                   <div className="space-y-4">
+                                       {METRICS.filter(m => m.category === 'performance').map(metric => (
+                                           <div key={metric.key}>
+                                               <label className="block text-xs text-slate-400 mb-1">{metric.label} ({metric.unit})</label>
+                                               <input 
+                                                   type="number" 
+                                                   step="0.01" 
+                                                   placeholder="0.00"
+                                                   className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:border-primary-500 outline-none"
+                                                   value={newEntryMetrics[metric.key] || ''}
+                                                   onChange={(e) => handleNewEntryMetricChange(metric.key as string, e.target.value)}
+                                               />
+                                           </div>
+                                       ))}
+                                   </div>
+                               </div>
+
+                               {/* Injury Prevention Column */}
+                               <div>
+                                   <h3 className="text-xs font-bold text-accent-500 uppercase tracking-wider mb-3 pb-1 border-b border-slate-800">
+                                       Injury Strategy
+                                   </h3>
+                                   <div className="space-y-4">
+                                       {METRICS.filter(m => m.category === 'injury_prevention').map(metric => (
+                                           <div key={metric.key}>
+                                               <label className="block text-xs text-slate-400 mb-1">{metric.label} ({metric.unit})</label>
+                                               <input 
+                                                   type="number" 
+                                                   step="0.01" 
+                                                   placeholder="0.00"
+                                                   className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-sm focus:border-accent-500 outline-none"
+                                                   value={newEntryMetrics[metric.key] || ''}
+                                                   onChange={(e) => handleNewEntryMetricChange(metric.key as string, e.target.value)}
+                                               />
+                                           </div>
+                                       ))}
+                                   </div>
+                               </div>
+                           </div>
+                       </form>
+                  </div>
+
+                  {/* Modal Footer */}
+                  <div className="p-4 border-t border-slate-800 bg-slate-950 flex justify-end gap-3">
+                      <button 
+                          type="button"
+                          onClick={() => setIsAddModalOpen(false)}
+                          className="px-4 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors text-sm"
+                      >
+                          Cancel
+                      </button>
+                      <button 
+                          type="submit"
+                          form="addDataForm"
+                          disabled={isSavingNewEntry}
+                          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-6 py-2 rounded-lg transition-all shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                      >
+                          {isSavingNewEntry ? 'Saving & Syncing...' : 'Save Record'}
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

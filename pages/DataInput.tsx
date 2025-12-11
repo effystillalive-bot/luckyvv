@@ -23,6 +23,7 @@ const DataInput: React.FC = () => {
   const [name, setName] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [metrics, setMetrics] = useState<Record<string, number>>({});
+  const [note, setNote] = useState('');
 
   useEffect(() => {
     fetchData().then(data => {
@@ -111,7 +112,7 @@ const DataInput: React.FC = () => {
       brakingRfdCmj: metrics['brakingRfdCmj'] || 0,
       rsiDj: metrics['rsiDj'] || 0,
       lrPeakBrakingForceDiff: metrics['lrPeakBrakingForceDiff'] || 0,
-      note: ''
+      note: note
     };
 
     // 1. Save locally
@@ -136,6 +137,7 @@ const DataInput: React.FC = () => {
     
     // Clear metrics for next entry, keep name/date
     setMetrics({});
+    setNote('');
     
     setTimeout(() => {
         setSuccessMsg('');
@@ -286,6 +288,19 @@ const DataInput: React.FC = () => {
                             </div>
                         ))}
                     </div>
+                </div>
+
+                {/* Note Field */}
+                <div>
+                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 border-b border-slate-800 pb-2">
+                        Session Notes
+                    </h3>
+                    <textarea 
+                        className="w-full bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-white focus:border-slate-500 focus:ring-1 focus:ring-slate-500 outline-none text-sm transition-all placeholder:text-slate-600 resize-y min-h-[80px]"
+                        placeholder="Optional: Add daily context, injury status, or session observations..."
+                        value={note}
+                        onChange={e => setNote(e.target.value)}
+                    />
                 </div>
 
             </div>

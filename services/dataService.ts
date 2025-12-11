@@ -47,6 +47,7 @@ const mapRowToAthlete = (getVal: (search: string) => string | null): AthleteData
     peakPropulsivePower: parseFloat(getVal('power') || '0'),
     peakPropulsiveForce: parseFloat(getVal('peak propulsive force') || '0'),
     lrPeakBrakingForceDiff: parseFloat(getVal('asym') || '0'),
+    note: getVal('note') || getVal('notes') || '',
   };
 };
 
@@ -226,8 +227,6 @@ const convertToExportUrl = (url: string): string => {
     }
 
     // Construct the export URL
-    // Note: Use 'export' endpoint for Shared sheets (Anyone with link) - Faster updates
-    // Note: Use 'pub' endpoint for Published sheets - Cached updates
     return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
 };
 
@@ -409,7 +408,10 @@ export const fetchData = async (): Promise<AthleteData[]> => {
   const manualData = getManualEntries();
   const dataMap = new Map<string, AthleteData>();
   
+  // Use a unique key that allows overrides. 
+  // Base data first
   baseData.forEach(d => dataMap.set(`${d.id}_${d.date}`, d));
+  // Manual data overrides if same ID and Date
   manualData.forEach(d => dataMap.set(`${d.id}_${d.date}`, d)); 
   
   const mergedData = Array.from(dataMap.values());
@@ -417,6 +419,7 @@ export const fetchData = async (): Promise<AthleteData[]> => {
 
   return mergedData.map(record => {
     const uniqueKey = `${record.id}_${record.date}`;
+    // Prefer local note override, then record note, then empty
     return {
       ...record,
       note: notes[uniqueKey] || record.note || ''
