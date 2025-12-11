@@ -7,7 +7,7 @@ const LOCAL_DATA_KEY = 'proformance_local_data';
 const MANUAL_DATA_KEY = 'proformance_manual_data';
 const NOTES_KEY = 'proformance_notes';
 const ATHLETE_NOTES_KEY = 'proformance_athlete_notes';
-const ATHLETE_ORDER_KEY = 'proformance_athlete_order'; // New key for sorting
+const ATHLETE_ORDER_KEY = 'proformance_athlete_order';
 
 // Declare XLSX globally as we load it via script tag
 declare const XLSX: any;
@@ -52,19 +52,25 @@ const mapRowToAthlete = (getVal: (search: string) => string | null): AthleteData
 // Helper to parse CSV string into objects
 const parseCSV = (csvText: string): AthleteData[] => {
   const lines = csvText.trim().split('\n');
+  if (lines.length < 2) return [];
+
   const headers = lines[0].split(',').map(h => h.trim());
 
   return lines.slice(1).map((line, index) => {
-    // Handle potential CSV quoting issues simply for now
+    // Basic CSV split, handling simple commas. 
+    // For complex CSVs with quoted commas, a more robust parser is needed, but this suffices for typical sheets.
     const values = line.split(','); 
     
+    // Skip empty lines
+    if (values.length < 2) return null;
+
     const getVal = (search: string) => {
       const idx = headers.findIndex(h => h.toLowerCase().includes(search.toLowerCase()));
       return idx !== -1 ? values[idx]?.trim() : null;
     };
 
     return mapRowToAthlete(getVal);
-  }).filter(d => d.name && d.date && d.name !== 'Unknown');
+  }).filter((d): d is AthleteData => d !== null && !!d.name && !!d.date && d.name !== 'Unknown');
 };
 
 // Generic File Parser (CSV, Excel, JSON)
@@ -359,12 +365,16 @@ export const fetchData = async (): Promise<AthleteData[]> => {
     if (sheetUrl && sheetUrl.includes('google.com/spreadsheets')) {
         try {
             const fetchUrl = convertToExportUrl(sheetUrl);
-            const response = await fetch(fetchUrl);
+            // Add Cache Busting Parameter to prevent browser from serving stale data
+            const cacheBuster = `t=${new Date().getTime()}`;
+            const finalUrl = fetchUrl.includes('?') ? `${fetchUrl}&${cacheBuster}` : `${fetchUrl}?${cacheBuster}`;
+
+            const response = await fetch(finalUrl);
             if (response.ok) {
                 csvData = await response.text();
             } else {
                 console.warn(`Failed to fetch Google Sheet: ${response.status} ${response.statusText}`);
-                console.warn('Ensure the Sheet is "Published to Web" as CSV to avoid CORS issues.');
+                console.warn('Ensure the Sheet is "Published to Web" as CSV. "Edit" links typically fail due to CORS.');
             }
         } catch (error) {
             console.error("Error fetching Google Sheet:", error);

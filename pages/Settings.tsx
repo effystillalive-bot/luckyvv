@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, FileSpreadsheet, Upload, Trash2, CheckCircle, AlertCircle, Database, Download, FileJson, Info } from 'lucide-react';
+import { Save, FileSpreadsheet, Upload, Trash2, CheckCircle, AlertCircle, Database, Download, FileJson, Info, AlertTriangle, RefreshCw } from 'lucide-react';
 import { getSheetUrl, saveSheetUrl, processFile, getDataSourceType, clearLocalData, fetchData, getManualEntries, saveGoogleScriptUrl, getGoogleScriptUrl } from '../services/dataService';
 
 declare const XLSX: any;
@@ -94,11 +94,24 @@ const Settings: React.FC = () => {
       }
   };
 
+  // Check if user has entered an "edit" link which likely won't work
+  const isEditLink = url.includes('/edit');
+
   return (
     <div className="max-w-3xl mx-auto space-y-8 pb-10">
       <div>
-        <h1 className="text-2xl font-bold text-white mb-2">Data Source Settings</h1>
-        <p className="text-slate-400">Configure where the application pulls athlete data from.</p>
+        <div className="flex justify-between items-center">
+             <div>
+                <h1 className="text-2xl font-bold text-white mb-2">Data Source Settings</h1>
+                <p className="text-slate-400">Configure where the application pulls athlete data from.</p>
+             </div>
+             <button 
+                onClick={() => window.location.reload()}
+                className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm text-slate-300 border border-slate-700 transition-colors"
+             >
+                <RefreshCw className="w-4 h-4" /> Force Refresh App
+             </button>
+        </div>
         
         <div className="mt-4 inline-flex items-center px-3 py-1 rounded-full bg-slate-900 border border-slate-700 text-sm">
             <span className="text-slate-400 mr-2">Current Source:</span>
@@ -129,7 +142,7 @@ const Settings: React.FC = () => {
                         <li><strong>Copy the link</strong> from the dialog and paste it below.</li>
                     </ol>
                     <p className="mt-2 text-xs text-slate-500 italic">
-                        Note: Standard "Edit" links usually fail due to browser security (CORS). Using "Publish to Web" is the reliable way.
+                        Note: "Publish to Web" updates may take up to 5 minutes to reflect due to Google caching.
                     </p>
                  </div>
              </div>
@@ -145,8 +158,19 @@ const Settings: React.FC = () => {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv"
-              className="w-full bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-sm text-white focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition-all placeholder:text-slate-600"
+              className={`w-full bg-slate-950/50 border rounded-lg p-3 text-sm text-white outline-none transition-all placeholder:text-slate-600 ${isEditLink ? 'border-amber-500/50 focus:border-amber-500' : 'border-slate-700 focus:border-primary-500 focus:ring-1 focus:ring-primary-500'}`}
             />
+            
+            {isEditLink && (
+              <div className="mt-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-start gap-3 text-amber-500 text-sm">
+                <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Caution: This looks like an Edit Link.</p>
+                  <p>The app cannot read directly from the editor link due to Google security settings.</p>
+                  <p className="mt-1">Please use the <strong>Publish to web</strong> link (ending in <code>output=csv</code>) as described above.</p>
+                </div>
+              </div>
+            )}
           </div>
           <button
             onClick={handleUrlSave}
