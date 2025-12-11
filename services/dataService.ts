@@ -375,44 +375,63 @@ export const getAthleteOrder = (): string[] => {
 
 export const fetchData = async (): Promise<AthleteData[]> => {
   let baseData: AthleteData[] = [];
+  let sheetSuccess = false;
 
-  // 1. Priority: Local File Data
-  const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
-  if (localDataStr) {
+  // 1. Priority: Google Sheet URL (User Setting OR Default)
+  // We prefer Google Sheet over local file if available to ensure live updates work.
+  let sheetUrl = localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL;
+  
+  if (sheetUrl && sheetUrl.includes('google.com/spreadsheets')) {
       try {
-        baseData = JSON.parse(localDataStr);
-      } catch (e) {
-          console.error("Failed to parse local data", e);
+          const fetchUrl = convertToExportUrl(sheetUrl);
+          const separator = fetchUrl.includes('?') ? '&' : '?';
+          const cacheBuster = `t=${new Date().getTime()}`;
+          const finalUrl = `${fetchUrl}${separator}${cacheBuster}`;
+
+          // Add 'no-store' cache mode to force browser to fetch fresh data
+          const response = await fetch(finalUrl, { 
+              cache: 'no-store',
+              headers: { 
+                  'Cache-Control': 'no-cache, no-store, must-revalidate',
+                  'Pragma': 'no-cache',
+                  'Expires': '0'
+              } 
+          });
+          
+          if (response.ok) {
+              const text = await response.text();
+              // Check if text is HTML (login page redirect or error)
+              if (text.trim().startsWith('<')) {
+                  console.warn(`Fetched data appears to be HTML. Likely a permission issue or invalid link.`);
+              } else {
+                  const parsed = parseCSV(text);
+                  if (parsed.length > 0) {
+                      baseData = parsed;
+                      sheetSuccess = true;
+                  }
+              }
+          } else {
+              console.warn(`Failed to fetch Google Sheet: ${response.status}`);
+          }
+      } catch (error) {
+          console.error("Error fetching Google Sheet:", error);
       }
-  } else {
-    // 2. Priority: Google Sheet URL (User Setting OR Default)
-    let sheetUrl = localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL;
-    let csvData = MOCK_DATA_CSV;
+  }
 
-    if (sheetUrl && sheetUrl.includes('google.com/spreadsheets')) {
-        try {
-            const fetchUrl = convertToExportUrl(sheetUrl);
-            const separator = fetchUrl.includes('?') ? '&' : '?';
-            const cacheBuster = `t=${new Date().getTime()}`;
-            const finalUrl = `${fetchUrl}${separator}${cacheBuster}`;
-
-            const response = await fetch(finalUrl);
-            if (response.ok) {
-                const text = await response.text();
-                // Check if text is HTML (login page redirect or error)
-                if (text.trim().startsWith('<')) {
-                    console.warn(`Fetched data appears to be HTML. Likely a permission issue or invalid link.`);
-                } else {
-                    csvData = text;
-                }
-            } else {
-                console.warn(`Failed to fetch Google Sheet: ${response.status}`);
-            }
-        } catch (error) {
-            console.error("Error fetching Google Sheet:", error);
-        }
-    }
-    baseData = parseCSV(csvData);
+  // 2. Priority: Local File Data (Fallback)
+  // Only use local file if Google Sheet failed or returned no data.
+  if (!sheetSuccess) {
+      const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
+      if (localDataStr) {
+          try {
+            baseData = JSON.parse(localDataStr);
+          } catch (e) {
+              console.error("Failed to parse local data", e);
+          }
+      } else if (!sheetUrl) {
+          // Fallback to mock data only if absolutely no other source
+          baseData = parseCSV(MOCK_DATA_CSV);
+      }
   }
 
   // 3. Merge with Manual Data
@@ -447,13 +466,13 @@ export const testGoogleSheetConnection = async (url: string): Promise<{success: 
         const separator = fetchUrl.includes('?') ? '&' : '?';
         const finalUrl = `${fetchUrl}${separator}${cacheBuster}`;
         
-        const response = await fetch(finalUrl);
+        const response = await fetch(finalUrl, { cache: 'no-store' });
         if (!response.ok) {
             return { success: false, message: `HTTP Error: ${response.status} ${response.statusText}`, count: 0 };
         }
         const text = await response.text();
         if (text.trim().startsWith('<')) {
-             return { success: false, message: "Error: URL returned HTML. Please check 'Share' settings (Anyone with link).", count: 0 };
+             return { success: false, message: "Error: URL returned HTML. Please check 'Share' settings (Anyone with the link).", count: 0 };
         }
         
         const data = parseCSV(text);
@@ -476,9 +495,9 @@ export const getSheetUrl = () => {
 };
 
 export const getDataSourceType = () => {
+    // Logic updated to reflect new priority
+    if (localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL) return 'google_sheet';
     if (localStorage.getItem(LOCAL_DATA_KEY)) return 'local_file';
-    if (localStorage.getItem(SETTINGS_KEY)) return 'google_sheet';
-    if (DEFAULT_SHEET_URL) return 'google_sheet'; // Default is now Google Sheet
     return 'demo';
 };
 
