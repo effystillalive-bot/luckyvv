@@ -50,6 +50,22 @@ const Analysis: React.FC = () => {
   const contentRef = useRef<HTMLDivElement>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
 
+  useEffect(() => {
+    // Responsive sidebar init
+    const handleResize = () => {
+      if (window.innerWidth < 1024) {
+        setIsSidebarOpen(false);
+      } else {
+        setIsSidebarOpen(true);
+      }
+    };
+    
+    // Set initial
+    if (window.innerWidth < 1024) setIsSidebarOpen(false);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const loadData = async (isBackgroundRefresh = false) => {
       if (!isBackgroundRefresh) setSyncing(true);
       
@@ -437,11 +453,11 @@ const Analysis: React.FC = () => {
   const previousRecord = filteredData[filteredData.length - 2];
 
   return (
-    <div className="flex h-[calc(100vh-6rem)] bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-2xl relative">
+    <div className="flex h-[calc(100vh-6rem)] md:h-[calc(100vh-4rem)] bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-2xl relative">
       
       {/* Sidebar - Athlete List */}
       <div 
-        className={`${isSidebarOpen ? 'w-80 translate-x-0' : 'w-0 -translate-x-full lg:translate-x-0 lg:w-0'} absolute lg:relative z-20 h-full bg-slate-900 border-r border-slate-800 transition-all duration-300 flex flex-col`}
+        className={`${isSidebarOpen ? 'w-full md:w-80 translate-x-0' : 'w-0 -translate-x-full lg:translate-x-0 lg:w-0'} absolute lg:relative z-20 h-full bg-slate-900 border-r border-slate-800 transition-all duration-300 flex flex-col`}
       >
           {/* Sidebar Header */}
           <div className={`p-4 border-b border-slate-800 flex flex-col gap-3 ${!isSidebarOpen && 'hidden lg:hidden'}`}>
@@ -482,7 +498,13 @@ const Analysis: React.FC = () => {
                       onDragEnter={() => handleDragEnter(index)}
                       onDragEnd={handleDragEnd}
                       onDragOver={(e) => e.preventDefault()}
-                      onClick={() => !isManageMode && setSelectedAthleteId(athlete.id)}
+                      onClick={() => {
+                          if (!isManageMode) {
+                              setSelectedAthleteId(athlete.id);
+                              // Auto close on mobile after selection
+                              if (window.innerWidth < 1024) setIsSidebarOpen(false);
+                          }
+                      }}
                       className={`w-full text-left px-4 py-3 border-b border-slate-800/30 hover:bg-slate-800/80 transition-all flex items-center gap-3 group relative cursor-pointer
                           ${selectedAthleteId === athlete.id && !isManageMode
                               ? 'bg-slate-800 border-l-4 border-l-primary-500' 
@@ -532,7 +554,7 @@ const Analysis: React.FC = () => {
       </div>
 
       {/* Toggle Button (Desktop & Mobile) */}
-      <div className={`absolute z-30 top-4 transition-all duration-300 ${isSidebarOpen ? 'left-80' : 'left-0'}`}>
+      <div className={`absolute z-30 top-4 transition-all duration-300 ${isSidebarOpen ? 'left-[calc(100%-2rem)] md:left-80' : 'left-0'}`}>
          <button 
              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
              className="bg-slate-800 border border-slate-700 border-l-0 text-slate-400 hover:text-white hover:bg-slate-700 h-10 w-6 flex items-center justify-center rounded-r-lg shadow-md focus:outline-none no-export"
@@ -544,12 +566,12 @@ const Analysis: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 bg-slate-950/50 relative">
-         <div className="flex-1 overflow-y-auto p-4 lg:p-8 scroll-smooth export-container" ref={contentRef}>
+         <div className="flex-1 overflow-y-auto p-4 lg:p-8 scroll-smooth export-container custom-scrollbar" ref={contentRef}>
             
             {/* Main Header / Filters */}
-            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-8 pl-8 lg:pl-0">
+            <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 mb-8 pl-8 lg:pl-0">
                 <div>
-                     <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+                     <h2 className="text-2xl font-bold text-white flex items-center gap-3 flex-wrap">
                         {currentRecord?.name || 'Select Athlete'}
                         {currentRecord && (
                             <span className="text-xs font-normal bg-slate-800 text-slate-400 px-2 py-1 rounded border border-slate-700">
@@ -574,7 +596,7 @@ const Analysis: React.FC = () => {
                      )}
                 </div>
                 
-                <div className="flex flex-nowrap items-center gap-2 lg:gap-3 overflow-x-auto w-full lg:w-auto">
+                <div className="flex flex-wrap items-center gap-2 lg:gap-3 w-full lg:w-auto">
                     {/* Add Data Button */}
                     {currentRecord && (
                         <button 
@@ -587,18 +609,18 @@ const Analysis: React.FC = () => {
                         </button>
                     )}
 
-                    <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm no-export shrink-0">
-                        <Calendar className="w-4 h-4 text-primary-500" />
+                    <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm no-export shrink-0 overflow-hidden">
+                        <Calendar className="w-4 h-4 text-primary-500 shrink-0" />
                         <input 
                             type="date" 
-                            className="bg-transparent text-white text-sm outline-none w-28 lg:w-32 border-none focus:ring-0 p-0"
+                            className="bg-transparent text-white text-sm outline-none w-24 sm:w-28 lg:w-32 border-none focus:ring-0 p-0"
                             value={dateRange.start}
                             onChange={(e) => setDateRange(prev => ({...prev, start: e.target.value}))}
                         />
                         <span className="text-slate-600">-</span>
                         <input 
                             type="date" 
-                            className="bg-transparent text-white text-sm outline-none w-28 lg:w-32 border-none focus:ring-0 p-0"
+                            className="bg-transparent text-white text-sm outline-none w-24 sm:w-28 lg:w-32 border-none focus:ring-0 p-0"
                             value={dateRange.end}
                             onChange={(e) => setDateRange(prev => ({...prev, end: e.target.value}))}
                         />
@@ -697,20 +719,20 @@ const Analysis: React.FC = () => {
                     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg mb-8">
                         <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900">
                             <h3 className="text-lg font-semibold text-white">Historical Data Log</h3>
-                            <div className="flex items-center gap-3 no-export text-xs text-slate-500">
+                            <div className="hidden sm:flex items-center gap-3 no-export text-xs text-slate-500">
                                 <span>Edit directly to update local & cloud data</span>
                             </div>
                         </div>
-                        <div className="overflow-x-auto">
+                        <div className="overflow-x-auto pb-2">
                             <table className="w-full text-left text-sm text-slate-400">
                                 <thead className="bg-slate-950 text-slate-200 uppercase font-medium text-xs">
                                     <tr>
-                                        <th className="px-4 py-3 sticky left-0 bg-slate-950 z-10 shadow-r">Date</th>
+                                        <th className="px-4 py-3 sticky left-0 bg-slate-950 z-10 shadow-r min-w-[100px]">Date</th>
                                         {METRICS.map(m => (
-                                            <th key={m.key} className="px-4 py-3 whitespace-nowrap" style={{ color: m.color }}>{m.label}</th>
+                                            <th key={m.key} className="px-4 py-3 whitespace-nowrap min-w-[100px]" style={{ color: m.color }}>{m.label}</th>
                                         ))}
                                         <th className="px-4 py-3 min-w-[200px]">Coach Note</th>
-                                        <th className="px-4 py-3 min-w-[80px] no-export text-center">Actions</th>
+                                        <th className="px-4 py-3 min-w-[80px] no-export text-center sticky right-0 bg-slate-950 z-10 shadow-l">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-800">
@@ -720,7 +742,7 @@ const Analysis: React.FC = () => {
 
                                         return (
                                             <tr key={recordKey} className={`hover:bg-slate-800/50 transition-colors group/row ${isEditing ? 'bg-slate-800/80' : ''}`}>
-                                                <td className="px-4 py-3 font-mono sticky left-0 bg-slate-900 z-10 border-r border-slate-800 text-slate-300 font-medium">
+                                                <td className="px-4 py-3 font-mono sticky left-0 bg-slate-900 z-10 border-r border-slate-800 text-slate-300 font-medium shadow-r">
                                                     {record.date}
                                                 </td>
                                                 {METRICS.map(m => (
@@ -782,7 +804,7 @@ const Analysis: React.FC = () => {
                                                         )
                                                     )}
                                                 </td>
-                                                <td className="px-4 py-3 text-center no-export">
+                                                <td className="px-4 py-3 text-center no-export sticky right-0 bg-slate-900 z-10 shadow-l border-l border-slate-800">
                                                     <div className="flex items-center justify-center gap-2">
                                                         {isEditing ? (
                                                             <>

@@ -257,10 +257,10 @@ const Dashboard: React.FC = () => {
               </div>
           </div>
 
-          <div className="flex flex-col lg:flex-row h-[600px] lg:h-[500px]">
+          <div className="flex flex-col lg:flex-row h-auto lg:h-[500px]">
               
               {/* Left Sidebar: Selector */}
-              <div className="w-full lg:w-64 bg-slate-900/50 border-r border-slate-800 flex flex-col">
+              <div className="w-full lg:w-64 bg-slate-900/50 border-r border-slate-800 flex flex-col h-64 lg:h-auto shrink-0">
                   <div className="p-3 border-b border-slate-800">
                       <div className="relative">
                           <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
@@ -274,12 +274,20 @@ const Dashboard: React.FC = () => {
                       </div>
                       <div className="flex justify-between items-center mt-2 px-1">
                           <span className="text-xs text-slate-500">{selectedAthletes.length} selected</span>
-                          <button 
-                             onClick={() => setSelectedAthletes([])}
-                             className="text-xs text-rose-500 hover:text-rose-400"
-                          >
-                             Clear
-                          </button>
+                          <div className="flex gap-2">
+                             <button 
+                                onClick={() => setSelectedAthletes(availableAthletes.map(a => a.id))}
+                                className="text-xs text-primary-500 hover:text-primary-400"
+                             >
+                                Select All
+                             </button>
+                             <button 
+                                onClick={() => setSelectedAthletes([])}
+                                className="text-xs text-rose-500 hover:text-rose-400"
+                             >
+                                Clear
+                             </button>
+                          </div>
                       </div>
                   </div>
                   <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
@@ -309,7 +317,7 @@ const Dashboard: React.FC = () => {
               </div>
 
               {/* Right Content: Charts */}
-              <div className="flex-1 overflow-y-auto p-4 lg:p-6 bg-slate-950">
+              <div className="flex-1 overflow-y-auto p-4 lg:p-6 bg-slate-950 min-h-[500px]">
                   {selectedAthletes.length > 0 ? (
                       <div className="grid grid-cols-1 gap-8">
                           
@@ -405,13 +413,13 @@ const Dashboard: React.FC = () => {
             <table className="w-full text-left text-sm text-slate-400">
                 <thead className="bg-slate-950 text-slate-200 uppercase font-medium text-xs">
                     <tr>
-                        <th className="px-6 py-3">Athlete</th>
-                        <th className="px-6 py-3">Last Recorded</th>
-                        <th className="px-6 py-3 text-primary-500">JH (cm)</th>
-                        <th className="px-6 py-3 text-accent-500">mRSI</th>
-                        <th className="px-6 py-3 text-blue-400">Propulsive RFD</th>
-                        <th className="px-6 py-3 text-orange-400">Braking RFD</th>
-                        <th className="px-6 py-3">Asymmetry</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Athlete</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Last Recorded</th>
+                        <th className="px-6 py-3 text-primary-500 whitespace-nowrap">JH (cm)</th>
+                        <th className="px-6 py-3 text-accent-500 whitespace-nowrap">mRSI</th>
+                        <th className="px-6 py-3 text-blue-400 whitespace-nowrap">Propulsive RFD</th>
+                        <th className="px-6 py-3 text-orange-400 whitespace-nowrap">Braking RFD</th>
+                        <th className="px-6 py-3 whitespace-nowrap">Asymmetry</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
