@@ -9,23 +9,26 @@ import { METRICS } from '../constants';
 const Dashboard: React.FC = () => {
   const [data, setData] = useState<AthleteData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date>(new Date());
 
   const loadDashboardData = async () => {
+      setSyncing(true);
       const fetchedData = await fetchData();
       setData(fetchedData);
       setLastSynced(new Date());
       setLoading(false);
+      setSyncing(false);
   };
 
   useEffect(() => {
     // Initial fetch
     loadDashboardData();
 
-    // Auto-refresh every 30 seconds to simulate real-time sync from Google Sheet
+    // Auto-refresh every 5 minutes (300,000ms) to simulate real-time sync from Google Sheet
     const interval = setInterval(() => {
         loadDashboardData();
-    }, 30000);
+    }, 300000);
 
     return () => clearInterval(interval);
   }, []);
@@ -73,15 +76,26 @@ const Dashboard: React.FC = () => {
             <h1 className="text-2xl font-bold text-white">Team Overview</h1>
             <p className="text-slate-400 text-sm">Aggregated performance data for all athletes.</p>
         </div>
-        <div className="flex flex-col items-end gap-1">
+        <div className="flex flex-col items-end gap-2">
              <div className="flex items-center text-sm text-slate-400 bg-slate-900 px-3 py-1 rounded border border-slate-800">
                 <div className="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse"></div>
                 System Status: Online
              </div>
-             <p className="text-xs text-slate-600 flex items-center">
-                 <RefreshCw className="w-3 h-3 mr-1" />
-                 Last synced: {lastSynced.toLocaleTimeString()}
-             </p>
+             
+             <div className="flex flex-col items-end">
+                <button 
+                    onClick={() => loadDashboardData()}
+                    disabled={syncing}
+                    className="flex items-center text-xs text-primary-400 hover:text-primary-300 transition-colors bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg hover:bg-slate-800 disabled:opacity-50"
+                    title="Click to force sync with Google Sheets"
+                >
+                    <RefreshCw className={`w-3.5 h-3.5 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+                    {syncing ? 'Syncing...' : 'Manual Sync'}
+                </button>
+                <span className="text-[10px] text-slate-600 mt-1 mr-1">
+                    Last: {lastSynced.toLocaleTimeString()}
+                </span>
+             </div>
         </div>
       </div>
 

@@ -14,6 +14,7 @@ declare const window: any;
 const Analysis: React.FC = () => {
   const [rawData, setRawData] = useState<AthleteData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [selectedAthleteId, setSelectedAthleteId] = useState<string>('');
   const [lastSynced, setLastSynced] = useState<Date>(new Date());
   
@@ -45,6 +46,8 @@ const Analysis: React.FC = () => {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   const loadData = async (isBackgroundRefresh = false) => {
+      if (!isBackgroundRefresh) setSyncing(true);
+      
       const data = await fetchData();
       
       // Sort data by date ascending
@@ -57,6 +60,7 @@ const Analysis: React.FC = () => {
           const savedOrder = getAthleteOrder();
           setAthleteOrder(savedOrder);
       }
+      setSyncing(false);
       return data;
   };
 
@@ -76,13 +80,13 @@ const Analysis: React.FC = () => {
       setLoading(false);
     });
 
-    // Auto-refresh Polling (every 30 seconds)
+    // Auto-refresh Polling (every 5 minutes)
     const interval = setInterval(() => {
         // Only refresh if not actively dragging or in modal to avoid jitter
         if (!isAddModalOpen && !draggedItemIndex) {
             loadData(true);
         }
-    }, 30000);
+    }, 300000);
 
     return () => clearInterval(interval);
   }, []);
@@ -504,10 +508,19 @@ const Analysis: React.FC = () => {
                         )}
                      </h2>
                      {currentRecord && (
-                        <p className="text-xs text-slate-500 flex items-center mt-1">
-                            <RefreshCw className="w-3 h-3 mr-1" />
-                            Auto-syncing (Last: {lastSynced.toLocaleTimeString()})
-                        </p>
+                        <div className="flex items-center gap-3 mt-1">
+                            <button 
+                                onClick={() => loadData(false)}
+                                disabled={syncing}
+                                className="flex items-center text-xs text-primary-400 hover:text-primary-300 transition-colors disabled:opacity-50"
+                            >
+                                <RefreshCw className={`w-3 h-3 mr-1 ${syncing ? 'animate-spin' : ''}`} />
+                                {syncing ? 'Syncing...' : 'Manual Sync'}
+                            </button>
+                            <span className="text-xs text-slate-500">
+                                (Last: {lastSynced.toLocaleTimeString()})
+                            </span>
+                        </div>
                      )}
                 </div>
                 
