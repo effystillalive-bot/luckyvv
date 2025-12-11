@@ -154,7 +154,7 @@ const Settings: React.FC = () => {
                  <div>
                     <p className="font-semibold text-slate-400 mb-1">Alternative: Publish to Web (Cached)</p>
                     <p className="text-slate-500">
-                        You can also use "File > Share > Publish to web (CSV)". However, Google caches this data, so updates may be <strong>delayed by 5-10 minutes</strong>.
+                        You can also use "File &gt; Share &gt; Publish to web (CSV)". However, Google caches this data, so updates may be <strong>delayed by 5-10 minutes</strong>.
                     </p>
                  </div>
              </div>
