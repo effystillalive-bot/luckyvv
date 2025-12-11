@@ -23,33 +23,52 @@ const excelDateToJSDate = (serial: number): string => {
    return date_info.toISOString().split('T')[0];
 }
 
+// Helper: Normalize various date formats to YYYY-MM-DD
+const normalizeDate = (dateStr: string): string => {
+    if (!dateStr) return new Date().toISOString().split('T')[0];
+    
+    // Handle Excel Serial
+    if (!dateStr.includes('-') && !dateStr.includes('/') && !isNaN(Number(dateStr))) {
+        return excelDateToJSDate(Number(dateStr));
+    }
+
+    // Handle YYYY/MM/DD (Replace / with -)
+    if (dateStr.includes('/')) {
+        const parts = dateStr.split('/');
+        // Check if YYYY/MM/DD or MM/DD/YYYY based on year length
+        if (parts[0].length === 4) {
+             return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        }
+    }
+    
+    return dateStr;
+};
+
 // Helper to map a row (array of values) to AthleteData using a getter function for headers
-const mapRowToAthlete = (getVal: (search: string) => string | null): AthleteData => {
-  const name = getVal('name') || 'Unknown';
-  // Attempt to standardize date format to YYYY-MM-DD
-  let dateRaw = getVal('date');
-  let date = dateRaw || new Date().toISOString().split('T')[0];
+const mapRowToAthlete = (getVal: (search: string[]) => string | null, nameFallback: string | null): AthleteData => {
+  // Try finding name with standard keys, otherwise use the fallback (usually Col 0)
+  const name = getVal(['name', '姓名', 'athlete']) || nameFallback || 'Unknown';
   
-  // Check if date is Excel serial number (e.g. 45000)
-  if (dateRaw && !dateRaw.includes('-') && !dateRaw.includes('/') && !isNaN(Number(dateRaw))) {
-      date = excelDateToJSDate(Number(dateRaw));
-  }
+  let dateRaw = getVal(['date', '日期', 'time']);
+  let date = normalizeDate(dateRaw || '');
+
+  const getNum = (keys: string[]) => parseFloat(getVal(keys) || '0');
 
   return {
     id: `${name.replace(/\s+/g, '-').toLowerCase()}`,
     name: name,
     date: date,
-    jh: parseFloat(getVal('jh') || '0'),
-    avgPropulsiveForce: parseFloat(getVal('avg propulsive force') || '0'),
-    mrsi: parseFloat(getVal('mrsi') || '0'),
-    timeToTakeoff: parseFloat(getVal('time to takeoff') || '0'),
-    propulsiveRfdSj: parseFloat(getVal('propulsive rfd') || '0'),
-    brakingRfdCmj: parseFloat(getVal('braking rfd') || '0'),
-    rsiDj: parseFloat(getVal('rsi (dj)') || '0'),
-    peakPropulsivePower: parseFloat(getVal('power') || '0'),
-    peakPropulsiveForce: parseFloat(getVal('peak propulsive force') || '0'),
-    lrPeakBrakingForceDiff: parseFloat(getVal('asym') || '0'),
-    note: getVal('note') || getVal('notes') || '',
+    jh: getNum(['jh', 'jump height', '跳躍高度']),
+    avgPropulsiveForce: getNum(['avg propulsive force', '平均推進力']),
+    mrsi: getNum(['mrsi', 'modified rsi']),
+    timeToTakeoff: getNum(['time to takeoff', '起跳時間']),
+    propulsiveRfdSj: getNum(['propulsive rfd', '推進率']),
+    brakingRfdCmj: getNum(['braking rfd', '煞車率']),
+    rsiDj: getNum(['rsi (dj)', 'rsi']),
+    peakPropulsivePower: getNum(['power', '功率']),
+    peakPropulsiveForce: getNum(['peak propulsive force', '最大推進力']),
+    lrPeakBrakingForceDiff: getNum(['asym', '不對稱', 'diff']),
+    note: getVal(['note', 'notes', '備註']) || '',
   };
 };
 
@@ -61,7 +80,7 @@ const parseCSV = (csvText: string): AthleteData[] => {
       return [];
   }
 
-  // Robust CSV parsing using XLSX to handle quoted strings (e.g. "Note, with comma")
+  // Robust CSV parsing using XLSX
   if (typeof XLSX !== 'undefined') {
       try {
           const workbook = XLSX.read(csvText, { type: 'string' });
@@ -75,48 +94,44 @@ const parseCSV = (csvText: string): AthleteData[] => {
               let headerRowIndex = 0;
               for(let i=0; i < Math.min(rows.length, 10); i++) {
                  const rowStr = rows[i].join(' ').toLowerCase();
-                 if (rowStr.includes('name') && (rowStr.includes('date') || rowStr.includes('jh'))) {
+                 // Relaxed check: look for 'date' OR 'jh' OR 'jump' to identify header
+                 if (rowStr.includes('date') || rowStr.includes('日期') || rowStr.includes('jh') || rowStr.includes('jump')) {
                      headerRowIndex = i;
                      break;
                  }
               }
 
-              const headers = (rows[headerRowIndex] as any[]).map(h => String(h));
+              const headers = (rows[headerRowIndex] as any[]).map(h => String(h).trim());
               const dataRows = rows.slice(headerRowIndex + 1);
 
               return dataRows.map((values) => {
-                  const getVal = (search: string) => {
-                      const idx = headers.findIndex(h => h.toLowerCase().includes(search.toLowerCase()));
+                  const getVal = (searchKeys: string[]) => {
+                      // Find index of header that contains any of the search keys
+                      const idx = headers.findIndex(h => 
+                          searchKeys.some(key => h.toLowerCase().includes(key.toLowerCase()))
+                      );
                       return idx !== -1 && values[idx] !== undefined ? String(values[idx]).trim() : null;
                   };
-                  return mapRowToAthlete(getVal);
+
+                  // Fallback for Name: If 'name' header not found, assume Column 0
+                  let nameFallback = null;
+                  const nameHeaderExists = headers.some(h => h.toLowerCase().includes('name') || h.toLowerCase().includes('姓名'));
+                  if (!nameHeaderExists && values[0]) {
+                      nameFallback = String(values[0]).trim();
+                  }
+
+                  return mapRowToAthlete(getVal, nameFallback);
               }).filter(d => d.name && d.date && d.name !== 'Unknown');
           }
       } catch (e) {
-          console.error("XLSX parse error on CSV, falling back to simple split", e);
+          console.error("XLSX parse error on CSV", e);
       }
   }
 
-  // Fallback: Simple split (Fragile with quoted commas)
-  const lines = csvText.trim().split('\n');
-  if (lines.length < 2) return [];
-
-  const headers = lines[0].split(',').map(h => h.trim());
-
-  return lines.slice(1).map((line, index) => {
-    const values = line.split(','); 
-    if (values.length < 2) return null;
-
-    const getVal = (search: string) => {
-      const idx = headers.findIndex(h => h.toLowerCase().includes(search.toLowerCase()));
-      return idx !== -1 ? values[idx]?.trim() : null;
-    };
-
-    return mapRowToAthlete(getVal);
-  }).filter((d): d is AthleteData => d !== null && !!d.name && !!d.date && d.name !== 'Unknown');
+  return [];
 };
 
-// Generic File Parser (CSV, Excel, JSON)
+// Generic File Parser
 export const parseFile = (file: File): Promise<AthleteData[]> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -126,62 +141,19 @@ export const parseFile = (file: File): Promise<AthleteData[]> => {
             try {
                 const data = e.target?.result;
                 let parsedData: AthleteData[] = [];
-
-                if (isExcel) {
-                    if (typeof XLSX === 'undefined') {
-                        throw new Error("XLSX library not loaded. Please refresh.");
-                    }
-                    const workbook = XLSX.read(data, { type: 'array' });
-                    const sheetName = workbook.SheetNames[0];
-                    const sheet = workbook.Sheets[sheetName];
-                    const json = XLSX.utils.sheet_to_json(sheet, { header: 1 }); 
-                    
-                    if (json.length > 0) {
-                        const rows = json as any[][];
-                        let headerRowIndex = 0;
-                        for(let i=0; i < Math.min(rows.length, 10); i++) {
-                            const rowStr = rows[i].join(' ').toLowerCase();
-                            if (rowStr.includes('name') && (rowStr.includes('date') || rowStr.includes('jh') || rowStr.includes('metric'))) {
-                                headerRowIndex = i;
-                                break;
-                            }
-                        }
-
-                        const headers = (rows[headerRowIndex] as any[]).map(h => String(h));
-                        const dataRows = rows.slice(headerRowIndex + 1);
-                        
-                        parsedData = dataRows.map((values) => {
-                            const getVal = (search: string) => {
-                                const idx = headers.findIndex(h => h.toLowerCase().includes(search.toLowerCase()));
-                                return idx !== -1 && values[idx] !== undefined ? String(values[idx]).trim() : null;
-                            };
-                            return mapRowToAthlete(getVal);
-                        }).filter(d => d.name && d.date && d.name !== 'Unknown');
-                    }
-                } else if (file.name.toLowerCase().endsWith('.json')) {
-                    const textData = data as string;
-                    let jsonData = JSON.parse(textData);
-                    if (!Array.isArray(jsonData) && typeof jsonData === 'object') {
-                        const possibleArray = Object.values(jsonData).find(val => Array.isArray(val));
-                        if (possibleArray) jsonData = possibleArray;
-                    }
-
-                    if (Array.isArray(jsonData)) {
-                        parsedData = jsonData.map((item: any) => {
-                            const getVal = (key: string) => {
-                                const foundKey = Object.keys(item).find(k => k.toLowerCase().includes(key.toLowerCase()));
-                                return foundKey ? String(item[foundKey]) : null;
-                            };
-                            return mapRowToAthlete(getVal);
-                        }).filter(d => d.name && d.date);
-                    }
-                } else {
-                    // CSV
+                // Implementation similar to parseCSV but handles binary Excel
+                // reusing parseCSV logic for text based CSV
+                if (!isExcel) {
                     parsedData = parseCSV(data as string);
+                } else {
+                     if (typeof XLSX === 'undefined') throw new Error("XLSX lib missing");
+                     const workbook = XLSX.read(data, { type: 'array' });
+                     const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                     const csv = XLSX.utils.sheet_to_csv(sheet);
+                     parsedData = parseCSV(csv);
                 }
                 resolve(parsedData);
             } catch (err) {
-                console.error("Parse error:", err);
                 reject(err);
             }
         };
@@ -205,32 +177,25 @@ export const clearLocalData = () => {
   localStorage.removeItem(LOCAL_DATA_KEY);
 };
 
-// Helper to convert Google Sheet URL to CSV Export URL
+// Helper to convert Google Sheet URL to CSV Export URL via GVIZ
 const convertToExportUrl = (url: string): string => {
     if (!url) return '';
-    
-    // 1. Check if it's already a publish-to-web CSV link
-    if (url.includes('output=csv') || url.includes('format=csv')) return url;
+    if (url.includes('tqx=out:csv')) return url;
 
-    // 2. Extract Spreadsheet ID
+    // Extract ID
     const idMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
     if (!idMatch || !idMatch[1]) return url;
     const id = idMatch[1];
 
-    // 3. Extract GID (Sheet ID)
+    // Extract GID
     let gid = '0';
     const queryGidMatch = url.match(/[?&]gid=([0-9]+)/);
     const hashGidMatch = url.match(/#gid=([0-9]+)/);
+    if (queryGidMatch) gid = queryGidMatch[1];
+    else if (hashGidMatch) gid = hashGidMatch[1];
 
-    // Prefer query parameter over hash
-    if (queryGidMatch) {
-        gid = queryGidMatch[1];
-    } else if (hashGidMatch) {
-        gid = hashGidMatch[1];
-    }
-
-    // Construct the export URL
-    return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+    // Use Google Visualization API for best CORS/CSV support
+    return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&gid=${gid}`;
 };
 
 // --- Google Sheet Backup Integration ---
@@ -248,11 +213,15 @@ export const backupToGoogleSheet = async (record: AthleteData): Promise<boolean>
     if (!scriptUrl) return false;
 
     try {
+        // Clean the record to ensure no undefined values are sent
+        // which might cause Google Script to write empty cells/rows improperly
+        const cleanRecord = JSON.parse(JSON.stringify(record));
+        
         await fetch(scriptUrl, {
             method: 'POST',
             mode: 'no-cors',
-            headers: { 'Content-Type': 'text/plain' },
-            body: JSON.stringify(record)
+            headers: { 'Content-Type': 'text/plain' }, // text/plain avoids preflight OPTIONS
+            body: JSON.stringify(cleanRecord)
         });
         return true;
     } catch (error) {
@@ -262,17 +231,13 @@ export const backupToGoogleSheet = async (record: AthleteData): Promise<boolean>
 };
 
 export const syncBatchToGoogleSheet = async (records: AthleteData[], onProgress?: (count: number) => void): Promise<void> => {
-    const scriptUrl = getGoogleScriptUrl();
-    if (!scriptUrl) return;
-
     for (let i = 0; i < records.length; i++) {
         await backupToGoogleSheet(records[i]);
         if (onProgress) onProgress(i + 1);
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 600)); // Slight delay to prevent rate limits
     }
 };
 
-// Check if both Read and Write are configured for 2-way sync
 export const checkSyncStatus = (): { read: boolean, write: boolean } => {
     const readUrl = localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL;
     const writeUrl = getGoogleScriptUrl();
@@ -282,92 +247,88 @@ export const checkSyncStatus = (): { read: boolean, write: boolean } => {
     };
 };
 
-// --- End Google Sheet Integration ---
-
-// Manual Data Management
-export const addManualEntry = (entry: AthleteData) => {
-    const manualDataStr = localStorage.getItem(MANUAL_DATA_KEY);
-    const manualData: AthleteData[] = manualDataStr ? JSON.parse(manualDataStr) : [];
-    
-    const existingIndex = manualData.findIndex(d => d.id === entry.id && d.date === entry.date);
-    if (existingIndex >= 0) {
-        manualData[existingIndex] = entry;
-    } else {
-        manualData.push(entry);
-    }
-    
-    localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(manualData));
-};
-
-export const batchAddManualEntries = (entries: AthleteData[]) => {
-    const manualDataStr = localStorage.getItem(MANUAL_DATA_KEY);
-    let manualData: AthleteData[] = manualDataStr ? JSON.parse(manualDataStr) : [];
-    
-    entries.forEach(entry => {
-        const existingIndex = manualData.findIndex(d => d.id === entry.id && d.date === entry.date);
-        if (existingIndex >= 0) {
-            manualData[existingIndex] = entry; 
-        } else {
-            manualData.push(entry); 
-        }
-    });
-    
-    localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(manualData));
-};
+// --- Manual Data Management ---
 
 export const getManualEntries = (): AthleteData[] => {
     const str = localStorage.getItem(MANUAL_DATA_KEY);
     return str ? JSON.parse(str) : [];
 };
 
+export const addManualEntry = (entry: AthleteData) => {
+    const current = getManualEntries();
+    // Remove existing if matching ID and Date (Upsert)
+    const filtered = current.filter(d => !(d.id === entry.id && d.date === entry.date));
+    filtered.push(entry);
+    localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(filtered));
+};
+
+export const batchAddManualEntries = (entries: AthleteData[]) => {
+    const current = getManualEntries();
+    const currentMap = new Map<string, AthleteData>();
+    current.forEach(d => currentMap.set(`${d.id}_${d.date}`, d));
+    
+    entries.forEach(d => {
+        currentMap.set(`${d.id}_${d.date}`, d);
+    });
+    
+    const merged = Array.from(currentMap.values());
+    localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(merged));
+};
+
 export const clearManualData = () => {
     localStorage.removeItem(MANUAL_DATA_KEY);
 };
 
-// --- Deletion & Sorting Features ---
-
-export const deleteSpecificEntry = (athleteId: string, date: string) => {
+export const deleteSpecificEntry = (id: string, date: string) => {
+    const current = getManualEntries();
+    const filtered = current.filter(d => !(d.id === id && d.date === date));
+    localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(filtered));
+    
+    // Also remove from local data cache if present
     const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
     if (localDataStr) {
-        let localData: AthleteData[] = JSON.parse(localDataStr);
-        localData = localData.filter(d => !(d.id === athleteId && d.date === date));
+        let localData = JSON.parse(localDataStr) as AthleteData[];
+        localData = localData.filter(d => !(d.id === id && d.date === date));
         localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(localData));
-    }
-
-    const manualDataStr = localStorage.getItem(MANUAL_DATA_KEY);
-    if (manualDataStr) {
-        let manualData: AthleteData[] = JSON.parse(manualDataStr);
-        manualData = manualData.filter(d => !(d.id === athleteId && d.date === date));
-        localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(manualData));
     }
 };
 
-export const deleteAthleteProfile = (athleteId: string) => {
+export const deleteAthleteProfile = (id: string) => {
+    // 1. Remove from Manual Data
+    const currentManual = getManualEntries();
+    const filteredManual = currentManual.filter(d => d.id !== id);
+    localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(filteredManual));
+
+    // 2. Remove from Local File Data (if applicable)
     const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
     if (localDataStr) {
-        let localData: AthleteData[] = JSON.parse(localDataStr);
-        localData = localData.filter(d => d.id !== athleteId);
+        let localData = JSON.parse(localDataStr) as AthleteData[];
+        localData = localData.filter(d => d.id !== id);
         localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(localData));
     }
 
-    const manualDataStr = localStorage.getItem(MANUAL_DATA_KEY);
-    if (manualDataStr) {
-        let manualData: AthleteData[] = JSON.parse(manualDataStr);
-        manualData = manualData.filter(d => d.id !== athleteId);
-        localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(manualData));
-    }
+    // 3. Remove Notes
+    const notes = getNotes();
+    Object.keys(notes).forEach(key => {
+        if (key.startsWith(`${id}_`)) delete notes[key];
+    });
+    localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
 
+    // 4. Remove Athlete Note
     const athleteNotes = getAthleteNotes();
-    delete athleteNotes[athleteId];
-    localStorage.setItem(ATHLETE_NOTES_KEY, JSON.stringify(athleteNotes));
-
-    let order = getAthleteOrder();
-    order = order.filter(id => id !== athleteId);
-    saveAthleteOrder(order);
+    if (athleteNotes[id]) {
+        delete athleteNotes[id];
+        localStorage.setItem(ATHLETE_NOTES_KEY, JSON.stringify(athleteNotes));
+    }
+    
+    // 5. Remove from Order
+    const order = getAthleteOrder();
+    const newOrder = order.filter(oid => oid !== id);
+    saveAthleteOrder(newOrder);
 };
 
-export const saveAthleteOrder = (athleteIds: string[]) => {
-    localStorage.setItem(ATHLETE_ORDER_KEY, JSON.stringify(athleteIds));
+export const saveAthleteOrder = (order: string[]) => {
+    localStorage.setItem(ATHLETE_ORDER_KEY, JSON.stringify(order));
 };
 
 export const getAthleteOrder = (): string[] => {
@@ -375,38 +336,37 @@ export const getAthleteOrder = (): string[] => {
     return str ? JSON.parse(str) : [];
 };
 
+// --- Data Fetching ---
+
 export const fetchData = async (): Promise<AthleteData[]> => {
   let baseData: AthleteData[] = [];
   
-  // 1. Determine URL: Prefer User Setting, fallback to Default
+  // Always prioritize Google Sheets to ensure sync
   const userSettingUrl = localStorage.getItem(SETTINGS_KEY);
   const targetUrl = userSettingUrl || DEFAULT_SHEET_URL;
 
   let sheetLoaded = false;
 
-  // 2. Try Fetching from Google Sheet
   if (targetUrl) {
       try {
           const fetchUrl = convertToExportUrl(targetUrl);
           const separator = fetchUrl.includes('?') ? '&' : '?';
-          // Use simple timestamp to bust cache, avoid aggressive headers that cause CORS
+          // Use simple timestamp cache buster
           const finalUrl = `${fetchUrl}${separator}t=${new Date().getTime()}`;
 
-          console.log("Fetching from:", finalUrl);
+          console.log("Fetching from GVIZ:", finalUrl);
           
           const response = await fetch(finalUrl);
           
           if (response.ok) {
               const text = await response.text();
-              // Validate content is not HTML (Login page)
+              // Validate content is not HTML
               if (!text.trim().startsWith('<')) {
                   const parsed = parseCSV(text);
                   if (parsed.length > 0) {
                       baseData = parsed;
                       sheetLoaded = true;
                   }
-              } else {
-                  console.warn("Fetched data appears to be HTML (likely login page or invalid link)");
               }
           }
       } catch (error) {
@@ -414,29 +374,23 @@ export const fetchData = async (): Promise<AthleteData[]> => {
       }
   }
 
-  // 3. Fallback: Local File Data (Only if Sheet failed)
+  // Fallback to local only if sheet failed
   if (!sheetLoaded) {
       const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
       if (localDataStr) {
-          try {
-            baseData = JSON.parse(localDataStr);
-          } catch (e) {
-              console.error("Failed to parse local data", e);
-          }
+          try { baseData = JSON.parse(localDataStr); } catch (e) {}
       }
   }
   
-  // 4. Fallback: Mock Data (Only if everything else failed)
-  if (baseData.length === 0) {
+  // Mock fallback
+  if (baseData.length === 0 && !sheetLoaded) {
       baseData = parseCSV(MOCK_DATA_CSV);
   }
 
-  // 5. Merge with Manual Data
+  // Merge Manual Data
   const manualData = getManualEntries();
   const dataMap = new Map<string, AthleteData>();
   
-  // Use a unique key that allows overrides. 
-  // Order matters: Base Data first, then Manual Data overrides it
   baseData.forEach(d => dataMap.set(`${d.id}_${d.date}`, d));
   manualData.forEach(d => dataMap.set(`${d.id}_${d.date}`, d)); 
   
@@ -445,7 +399,6 @@ export const fetchData = async (): Promise<AthleteData[]> => {
 
   return mergedData.map(record => {
     const uniqueKey = `${record.id}_${record.date}`;
-    // Prefer local note override, then record note, then empty
     return {
       ...record,
       note: notes[uniqueKey] || record.note || ''
@@ -453,74 +406,47 @@ export const fetchData = async (): Promise<AthleteData[]> => {
   });
 };
 
+// --- Misc Helpers ---
+
 export const testGoogleSheetConnection = async (url: string): Promise<{success: boolean, message: string, count: number}> => {
     if (!url) return { success: false, message: "No URL provided", count: 0 };
-    
     try {
         const fetchUrl = convertToExportUrl(url);
-        const cacheBuster = `t=${new Date().getTime()}`;
-        const separator = fetchUrl.includes('?') ? '&' : '?';
-        const finalUrl = `${fetchUrl}${separator}${cacheBuster}`;
-        
+        const finalUrl = `${fetchUrl}&t=${new Date().getTime()}`;
         const response = await fetch(finalUrl);
-        if (!response.ok) {
-            return { success: false, message: `HTTP Error: ${response.status} ${response.statusText}`, count: 0 };
-        }
+        if (!response.ok) return { success: false, message: `HTTP Error: ${response.status}`, count: 0 };
         const text = await response.text();
-        if (text.trim().startsWith('<')) {
-             return { success: false, message: "Error: URL returned HTML. Please check 'Share' settings (Anyone with the link).", count: 0 };
-        }
-        
+        if (text.trim().startsWith('<')) return { success: false, message: "URL returned HTML. Check permissions.", count: 0 };
         const data = parseCSV(text);
-        if (data.length === 0) {
-            return { success: false, message: "Connection successful, but found 0 valid athlete records.", count: 0 };
-        }
-        
+        if (data.length === 0) return { success: false, message: "Connection OK but 0 valid records found. Check columns.", count: 0 };
         return { success: true, message: `Success! Found ${data.length} records.`, count: data.length };
     } catch (e: any) {
         return { success: false, message: `Fetch Error: ${e.message}`, count: 0 };
     }
 }
 
-export const saveSheetUrl = (url: string) => {
-  localStorage.setItem(SETTINGS_KEY, url);
-};
-
-export const getSheetUrl = () => {
-  return localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL;
-};
-
+export const saveSheetUrl = (url: string) => { localStorage.setItem(SETTINGS_KEY, url); };
+export const getSheetUrl = () => { return localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL; };
 export const getDataSourceType = () => {
-    // If we have a working default or setting, we assume google sheet
-    const url = localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL;
-    if (url) return 'google_sheet';
+    if (localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL) return 'google_sheet';
     if (localStorage.getItem(LOCAL_DATA_KEY)) return 'local_file';
     return 'demo';
 };
-
-// Notes Management
 export const saveNote = (athleteId: string, date: string, note: string) => {
   const notes = getNotes();
   const key = `${athleteId}_${date}`;
-  if (note.trim() === '') {
-    delete notes[key];
-  } else {
-    notes[key] = note;
-  }
+  if (note.trim() === '') delete notes[key]; else notes[key] = note;
   localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
 };
-
 export const getNotes = (): Record<string, string> => {
   const str = localStorage.getItem(NOTES_KEY);
   return str ? JSON.parse(str) : {};
 };
-
 export const saveAthleteNote = (athleteId: string, note: string) => {
     const notes = getAthleteNotes();
     notes[athleteId] = note;
     localStorage.setItem(ATHLETE_NOTES_KEY, JSON.stringify(notes));
 };
-
 export const getAthleteNotes = (): Record<string, string> => {
     const str = localStorage.getItem(ATHLETE_NOTES_KEY);
     return str ? JSON.parse(str) : {};
