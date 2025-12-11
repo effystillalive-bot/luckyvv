@@ -8,6 +8,7 @@ const MANUAL_DATA_KEY = 'proformance_manual_data';
 const NOTES_KEY = 'proformance_notes';
 const ATHLETE_NOTES_KEY = 'proformance_athlete_notes';
 const ATHLETE_ORDER_KEY = 'proformance_athlete_order';
+const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwh9gkeMqsJQ_yfYABTBQGb1OE3RqLMfnzxmpJnvf_E_HyH7_jHuMD6zGb1m3JUM-I/exec';
 
 // Declare XLSX globally as we load it via script tag
 declare const XLSX: any;
@@ -207,7 +208,7 @@ export const saveGoogleScriptUrl = (url: string) => {
 };
 
 export const getGoogleScriptUrl = () => {
-    return localStorage.getItem(SCRIPT_URL_KEY) || '';
+    return localStorage.getItem(SCRIPT_URL_KEY) || DEFAULT_WEBHOOK_URL;
 };
 
 export const backupToGoogleSheet = async (record: AthleteData): Promise<boolean> => {
@@ -366,8 +367,9 @@ export const fetchData = async (): Promise<AthleteData[]> => {
         try {
             const fetchUrl = convertToExportUrl(sheetUrl);
             // Add Cache Busting Parameter to prevent browser from serving stale data
+            const separator = fetchUrl.includes('?') ? '&' : '?';
             const cacheBuster = `t=${new Date().getTime()}`;
-            const finalUrl = fetchUrl.includes('?') ? `${fetchUrl}&${cacheBuster}` : `${fetchUrl}?${cacheBuster}`;
+            const finalUrl = `${fetchUrl}${separator}${cacheBuster}`;
 
             const response = await fetch(finalUrl);
             if (response.ok) {

@@ -108,6 +108,7 @@ const Settings: React.FC = () => {
              <button 
                 onClick={() => window.location.reload()}
                 className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm text-slate-300 border border-slate-700 transition-colors"
+                title="Reload the app to fetch the latest data"
              >
                 <RefreshCw className="w-4 h-4" /> Force Refresh App
              </button>
@@ -162,12 +163,12 @@ const Settings: React.FC = () => {
             />
             
             {isEditLink && (
-              <div className="mt-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-start gap-3 text-amber-500 text-sm">
+              <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-start gap-3 text-amber-500 text-sm animate-pulse">
                 <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
                 <div>
                   <p className="font-bold">Caution: This looks like an Edit Link.</p>
-                  <p>The app cannot read directly from the editor link due to Google security settings.</p>
-                  <p className="mt-1">Please use the <strong>Publish to web</strong> link (ending in <code>output=csv</code>) as described above.</p>
+                  <p>The app cannot read directly from the editor link due to Google security policies.</p>
+                  <p className="mt-1">Please use the <strong>Publish to web</strong> link (ending in <code>output=csv</code>) as described above to ensure data loads correctly.</p>
                 </div>
               </div>
             )}
