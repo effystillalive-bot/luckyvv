@@ -169,11 +169,29 @@ export const clearLocalData = () => {
 
 // Helper to convert Google Sheet URL to CSV Export URL
 const convertToExportUrl = (url: string): string => {
-    const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-    if (match && match[1]) {
-        return `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=csv`;
+    // 1. Check if it's already a publish-to-web CSV link
+    if (url.includes('output=csv') || url.includes('format=csv')) return url;
+
+    // 2. Extract Spreadsheet ID
+    const idMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (!idMatch || !idMatch[1]) return url;
+    const id = idMatch[1];
+
+    // 3. Extract GID (Sheet ID)
+    // Priority: Query param (?gid=), then Fragment (#gid=), then default '0'
+    let gid = '0';
+    const queryGidMatch = url.match(/[?&]gid=([0-9]+)/);
+    const hashGidMatch = url.match(/#gid=([0-9]+)/);
+
+    if (queryGidMatch) {
+        gid = queryGidMatch[1];
+    } else if (hashGidMatch) {
+        gid = hashGidMatch[1];
     }
-    return url;
+
+    // Construct the export URL
+    // Note: The sheet MUST be "Published to Web" as CSV for this to work robustly via Fetch API due to CORS.
+    return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
 };
 
 // --- Google Sheet Backup Integration ---
@@ -340,15 +358,16 @@ export const fetchData = async (): Promise<AthleteData[]> => {
 
     if (sheetUrl && sheetUrl.includes('google.com/spreadsheets')) {
         try {
-        const fetchUrl = convertToExportUrl(sheetUrl);
-        const response = await fetch(fetchUrl);
-        if (response.ok) {
-            csvData = await response.text();
-        } else {
-            console.error("Failed to fetch Google Sheet.");
-        }
+            const fetchUrl = convertToExportUrl(sheetUrl);
+            const response = await fetch(fetchUrl);
+            if (response.ok) {
+                csvData = await response.text();
+            } else {
+                console.warn(`Failed to fetch Google Sheet: ${response.status} ${response.statusText}`);
+                console.warn('Ensure the Sheet is "Published to Web" as CSV to avoid CORS issues.');
+            }
         } catch (error) {
-        console.error("Error fetching Google Sheet:", error);
+            console.error("Error fetching Google Sheet:", error);
         }
     }
     baseData = parseCSV(csvData);

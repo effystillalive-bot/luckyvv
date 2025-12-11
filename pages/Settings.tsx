@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, FileSpreadsheet, Upload, Trash2, CheckCircle, AlertCircle, Database, Download, FileJson } from 'lucide-react';
+import { Save, FileSpreadsheet, Upload, Trash2, CheckCircle, AlertCircle, Database, Download, FileJson, Info } from 'lucide-react';
 import { getSheetUrl, saveSheetUrl, processFile, getDataSourceType, clearLocalData, fetchData, getManualEntries, saveGoogleScriptUrl, getGoogleScriptUrl } from '../services/dataService';
 
 declare const XLSX: any;
@@ -20,7 +20,7 @@ const Settings: React.FC = () => {
   }, []);
 
   const handleUrlSave = () => {
-    saveSheetUrl(url);
+    saveSheetUrl(url.trim());
     setSaved(true);
     setTimeout(() => {
         setSaved(false);
@@ -108,18 +108,68 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
+      {/* Option 2: Google Sheet Reading */}
+      <div className={`bg-slate-900 border rounded-xl p-6 shadow-lg transition-all ${sourceType === 'google_sheet' ? 'border-primary-500 ring-1 ring-primary-500/20' : 'border-slate-800'}`}>
+        <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
+            <FileSpreadsheet className="w-5 h-5 mr-2 text-primary-500" />
+            Google Sheet Connection (Read Only)
+        </h2>
+        
+        <div className="bg-slate-950/50 p-4 rounded-lg text-sm text-slate-400 border border-slate-700/50 mb-6">
+             <div className="flex items-start gap-3">
+                 <Info className="w-5 h-5 text-primary-500 shrink-0 mt-0.5" />
+                 <div>
+                    <p className="font-semibold text-slate-300 mb-2">How to connect for Live Updates:</p>
+                    <ol className="list-decimal list-inside space-y-1.5 ml-1">
+                        <li>Open your Google Sheet.</li>
+                        <li>Go to <strong>File {'>'} Share {'>'} Publish to web</strong>.</li>
+                        <li>Ensure the specific sheet (tab) is selected.</li>
+                        <li>Change "Web page" to <strong>Comma-separated values (.csv)</strong>.</li>
+                        <li>Click <strong>Publish</strong>.</li>
+                        <li><strong>Copy the link</strong> from the dialog and paste it below.</li>
+                    </ol>
+                    <p className="mt-2 text-xs text-slate-500 italic">
+                        Note: Standard "Edit" links usually fail due to browser security (CORS). Using "Publish to Web" is the reliable way.
+                    </p>
+                 </div>
+             </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              Google Sheet Published Link (CSV)
+            </label>
+            <input
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv"
+              className="w-full bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-sm text-white focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition-all placeholder:text-slate-600"
+            />
+          </div>
+          <button
+            onClick={handleUrlSave}
+            className="flex items-center px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors text-sm font-medium"
+          >
+            <Save className="w-4 h-4 mr-2" />
+            {saved ? 'Saved & Refreshing...' : 'Save Connection'}
+          </button>
+        </div>
+      </div>
+
       {/* Option 3: Google Apps Script for Writing */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg">
         <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
             <Database className="w-5 h-5 mr-2 text-purple-500" />
-            Automatic Google Sheet Backup
+            Automatic Google Sheet Backup (Write Access)
         </h2>
         
         <div className="space-y-4">
             <div className="bg-slate-950/50 p-4 rounded-lg text-sm text-slate-400 border border-slate-700/50">
-                <p className="mb-2 font-semibold text-slate-300">How to enable automatic cloud backup:</p>
+                <p className="mb-2 font-semibold text-slate-300">How to enable automatic backup:</p>
                 <ol className="list-decimal list-inside space-y-1 ml-1">
-                    <li>Open your <a href="https://docs.google.com/spreadsheets/d/1476xvdLdcXzAyQio2WsXuii8ailSk7PNKfR_iLmu0WA/edit" target="_blank" rel="noreferrer" className="text-primary-500 hover:underline">Google Sheet</a>.</li>
+                    <li>Open your Google Sheet.</li>
                     <li>Go to <strong>Extensions {'>'} Apps Script</strong>.</li>
                     <li>Paste the backup script (provided by your developer).</li>
                     <li>Click <strong>Deploy {'>'} New deployment {'>'} Web App</strong>.</li>
@@ -150,40 +200,12 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
-      {/* Data Backup Section */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg">
-           <h2 className="text-lg font-semibold text-white mb-2 flex items-center">
-               <Download className="w-5 h-5 mr-2 text-sky-500" />
-               Data Backup & Preservation
-           </h2>
-           <p className="text-sm text-slate-400 mb-6">
-               Since this application runs in your browser, perform regular backups to ensure your data is safe even if you clear your cache.
-           </p>
-
-           <div className="flex flex-wrap gap-4">
-               <button 
-                   onClick={() => handleExportBackup('xlsx')}
-                   className="flex items-center px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg border border-slate-700 transition-all"
-               >
-                   <FileSpreadsheet className="w-5 h-5 mr-2 text-emerald-500" />
-                   Export Full Backup (.xlsx)
-               </button>
-               <button 
-                   onClick={() => handleExportBackup('json')}
-                   className="flex items-center px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg border border-slate-700 transition-all"
-               >
-                   <FileJson className="w-5 h-5 mr-2 text-amber-500" />
-                   Export Full Backup (.json)
-               </button>
-           </div>
-      </div>
-
       {/* Option 1: File Upload */}
       <div className={`bg-slate-900 border rounded-xl p-6 shadow-lg transition-all ${sourceType === 'local_file' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : 'border-slate-800'}`}>
         <div className="flex justify-between items-start mb-4">
              <h2 className="text-lg font-semibold text-white flex items-center">
                 <Upload className="w-5 h-5 mr-2 text-emerald-500" /> 
-                Upload Excel / CSV
+                Upload Excel / CSV (Local Override)
             </h2>
             {sourceType === 'local_file' && (
                 <button 
@@ -197,7 +219,7 @@ const Settings: React.FC = () => {
         
         <div className="space-y-4">
           <p className="text-sm text-slate-400">
-             Directly upload an Excel file (.xlsx, .xls) or CSV to serve as the main database.
+             Directly upload an Excel file (.xlsx, .xls) or CSV to serve as the main database. This will override any Google Sheet connection.
           </p>
           
           <div className="relative">
@@ -233,34 +255,32 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
-      {/* Option 2: Google Sheet */}
-      <div className={`bg-slate-900 border rounded-xl p-6 shadow-lg transition-all ${sourceType === 'google_sheet' ? 'border-primary-500 ring-1 ring-primary-500/20' : 'border-slate-800'}`}>
-        <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
-            <FileSpreadsheet className="w-5 h-5 mr-2 text-primary-500" />
-            Google Sheet Reading
-        </h2>
-        
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
-              Google Sheet Link (Read Access)
-            </label>
-            <input
-              type="text"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/..."
-              className="w-full bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-sm text-white focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition-all placeholder:text-slate-600"
-            />
-          </div>
-          <button
-            onClick={handleUrlSave}
-            className="flex items-center px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors text-sm font-medium"
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {saved ? 'Saved!' : 'Save Connection'}
-          </button>
-        </div>
+       {/* Data Backup Section */}
+       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg">
+           <h2 className="text-lg font-semibold text-white mb-2 flex items-center">
+               <Download className="w-5 h-5 mr-2 text-sky-500" />
+               Data Backup & Preservation
+           </h2>
+           <p className="text-sm text-slate-400 mb-6">
+               Since this application runs in your browser, perform regular backups to ensure your data is safe even if you clear your cache.
+           </p>
+
+           <div className="flex flex-wrap gap-4">
+               <button 
+                   onClick={() => handleExportBackup('xlsx')}
+                   className="flex items-center px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg border border-slate-700 transition-all"
+               >
+                   <FileSpreadsheet className="w-5 h-5 mr-2 text-emerald-500" />
+                   Export Full Backup (.xlsx)
+               </button>
+               <button 
+                   onClick={() => handleExportBackup('json')}
+                   className="flex items-center px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg border border-slate-700 transition-all"
+               >
+                   <FileJson className="w-5 h-5 mr-2 text-amber-500" />
+                   Export Full Backup (.json)
+               </button>
+           </div>
       </div>
     </div>
   );
