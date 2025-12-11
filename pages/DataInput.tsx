@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Plus, CheckCircle, Upload, FileText, AlertCircle, Database, Download } from 'lucide-react';
+import { Save, Plus, CheckCircle, Upload, FileText, AlertCircle, Database, Download, RefreshCw } from 'lucide-react';
 import { METRICS } from '../constants';
 import { fetchData, addManualEntry, parseFile, batchAddManualEntries, backupToGoogleSheet, getManualEntries, syncBatchToGoogleSheet, getGoogleScriptUrl } from '../services/dataService';
 import { AthleteData } from '../types';
@@ -9,6 +9,7 @@ declare const XLSX: any;
 const DataInput: React.FC = () => {
   const [existingAthletes, setExistingAthletes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingAthletes, setLoadingAthletes] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [backupStatus, setBackupStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
 
@@ -21,16 +22,34 @@ const DataInput: React.FC = () => {
   // Manual Form State
   const [isNewAthlete, setIsNewAthlete] = useState(false);
   const [name, setName] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  // Use local date for default value (YYYY-MM-DD)
+  const [date, setDate] = useState(() => {
+    const now = new Date();
+    // Adjust for timezone offset to get correct local date string
+    const local = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
+    return local.toISOString().split('T')[0];
+  });
+
   const [metrics, setMetrics] = useState<Record<string, number>>({});
   const [note, setNote] = useState('');
 
+  const loadAthletes = async () => {
+    setLoadingAthletes(true);
+    try {
+        const data = await fetchData();
+        const uniqueNames = Array.from(new Set(data.map(d => d.name))).sort();
+        setExistingAthletes(uniqueNames);
+    } catch (e) {
+        console.error("Failed to load athletes", e);
+    } finally {
+        setLoading(false);
+        setLoadingAthletes(false);
+    }
+  };
+
   useEffect(() => {
-    fetchData().then(data => {
-      const uniqueNames = Array.from(new Set(data.map(d => d.name))).sort();
-      setExistingAthletes(uniqueNames);
-      setLoading(false);
-    });
+    loadAthletes();
   }, []);
 
   const handleMetricChange = (key: string, value: string) => {
@@ -218,6 +237,15 @@ const DataInput: React.FC = () => {
                                 <option key={a} value={a}>{a}</option>
                             ))}
                         </select>
+                        <button 
+                            type="button"
+                            onClick={loadAthletes}
+                            disabled={loadingAthletes}
+                            className="bg-slate-800 border border-slate-700 p-2.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+                            title="Refresh Athlete List"
+                        >
+                            <RefreshCw className={`w-5 h-5 ${loadingAthletes ? 'animate-spin' : ''}`} />
+                        </button>
                         <button 
                             type="button"
                             onClick={() => { setIsNewAthlete(true); setName(''); }}
