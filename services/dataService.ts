@@ -9,6 +9,7 @@ const NOTES_KEY = 'proformance_notes';
 const ATHLETE_NOTES_KEY = 'proformance_athlete_notes';
 const ATHLETE_ORDER_KEY = 'proformance_athlete_order';
 const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwh9gkeMqsJQ_yfYABTBQGb1OE3RqLMfnzxmpJnvf_E_HyH7_jHuMD6zGb1m3JUM-I/exec';
+// User's specific sheet as default
 const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1476xvdLdcXzAyQio2WsXuii8ailSk7PNKfR_iLmu0WA/edit?gid=0#gid=0';
 
 // Declare XLSX globally as we load it via script tag
@@ -376,81 +377,58 @@ export const getAthleteOrder = (): string[] => {
 
 export const fetchData = async (): Promise<AthleteData[]> => {
   let baseData: AthleteData[] = [];
-  let sheetSuccess = false;
+  
+  // 1. Determine URL: Prefer User Setting, fallback to Default
+  const userSettingUrl = localStorage.getItem(SETTINGS_KEY);
+  const targetUrl = userSettingUrl || DEFAULT_SHEET_URL;
 
-  // Function to try fetching a URL
-  const tryFetch = async (targetUrl: string): Promise<AthleteData[] | null> => {
+  let sheetLoaded = false;
+
+  // 2. Try Fetching from Google Sheet
+  if (targetUrl) {
       try {
           const fetchUrl = convertToExportUrl(targetUrl);
           const separator = fetchUrl.includes('?') ? '&' : '?';
-          const cacheBuster = `t=${new Date().getTime()}`;
-          const finalUrl = `${fetchUrl}${separator}${cacheBuster}`;
+          // Use simple timestamp to bust cache, avoid aggressive headers that cause CORS
+          const finalUrl = `${fetchUrl}${separator}t=${new Date().getTime()}`;
 
-          const response = await fetch(finalUrl, {
-              method: 'GET',
-              cache: 'no-store', // Critical for forcing network request
-              // Note: We do NOT use custom headers here (Pragma/Cache-Control) to avoid CORS preflight issues with Google Sheets
-          });
+          console.log("Fetching from:", finalUrl);
+          
+          const response = await fetch(finalUrl);
           
           if (response.ok) {
               const text = await response.text();
-              // Check if text is HTML (login page redirect or error)
-              if (text.trim().startsWith('<')) {
-                  console.warn(`HTML response received for ${targetUrl} - likely invalid link or permission error.`);
-                  return null;
+              // Validate content is not HTML (Login page)
+              if (!text.trim().startsWith('<')) {
+                  const parsed = parseCSV(text);
+                  if (parsed.length > 0) {
+                      baseData = parsed;
+                      sheetLoaded = true;
+                  }
+              } else {
+                  console.warn("Fetched data appears to be HTML (likely login page or invalid link)");
               }
-              const parsed = parseCSV(text);
-              if (parsed.length > 0) return parsed;
-          } else {
-             console.warn(`Fetch failed for ${targetUrl}: ${response.status}`);
           }
       } catch (error) {
-          console.error("Fetch error:", error);
-      }
-      return null;
-  };
-
-  // 1. Determine URLs to try
-  const userSettingUrl = localStorage.getItem(SETTINGS_KEY);
-  const defaultUrl = DEFAULT_SHEET_URL;
-
-  // 2. Try User Setting URL first (if exists)
-  if (userSettingUrl && userSettingUrl.trim() !== '') {
-       const result = await tryFetch(userSettingUrl);
-       if (result) {
-           baseData = result;
-           sheetSuccess = true;
-       }
-  }
-
-  // 3. Fallback: If User Setting failed (or didn't exist) AND Default is different/valid, try Default
-  if (!sheetSuccess && defaultUrl && defaultUrl !== userSettingUrl) {
-      console.log("User setting failed or empty, trying default sheet URL...");
-      const result = await tryFetch(defaultUrl);
-      if (result) {
-           baseData = result;
-           sheetSuccess = true;
-           // Optional: Auto-correct the setting so user sees what worked? 
-           // localStorage.setItem(SETTINGS_KEY, defaultUrl); 
+          console.error("Google Sheet Fetch Error:", error);
       }
   }
 
-  // 4. Fallback: Local File Data (Lowest priority)
-  // Only use local file if Google Sheet completely failed
-  if (!sheetSuccess) {
+  // 3. Fallback: Local File Data (Only if Sheet failed)
+  if (!sheetLoaded) {
       const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
       if (localDataStr) {
           try {
             baseData = JSON.parse(localDataStr);
-            console.log("Using local file backup.");
           } catch (e) {
               console.error("Failed to parse local data", e);
           }
-      } else if (!sheetSuccess && !baseData.length) {
-          // Absolute last resort
-          console.warn("No data sources available. Using mock data.");
-          baseData = parseCSV(MOCK_DATA_CSV);
       }
+  }
+  
+  // 4. Fallback: Mock Data (Only if everything else failed)
+  if (baseData.length === 0) {
+      baseData = parseCSV(MOCK_DATA_CSV);
   }
 
   // 5. Merge with Manual Data
@@ -458,6 +436,7 @@ export const fetchData = async (): Promise<AthleteData[]> => {
   const dataMap = new Map<string, AthleteData>();
   
   // Use a unique key that allows overrides. 
+  // Order matters: Base Data first, then Manual Data overrides it
   baseData.forEach(d => dataMap.set(`${d.id}_${d.date}`, d));
   manualData.forEach(d => dataMap.set(`${d.id}_${d.date}`, d)); 
   
@@ -483,7 +462,7 @@ export const testGoogleSheetConnection = async (url: string): Promise<{success: 
         const separator = fetchUrl.includes('?') ? '&' : '?';
         const finalUrl = `${fetchUrl}${separator}${cacheBuster}`;
         
-        const response = await fetch(finalUrl, { cache: 'no-store' });
+        const response = await fetch(finalUrl);
         if (!response.ok) {
             return { success: false, message: `HTTP Error: ${response.status} ${response.statusText}`, count: 0 };
         }
@@ -512,9 +491,9 @@ export const getSheetUrl = () => {
 };
 
 export const getDataSourceType = () => {
-    // Logic updated to reflect new priority
     // If we have a working default or setting, we assume google sheet
-    if (localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL) return 'google_sheet';
+    const url = localStorage.getItem(SETTINGS_KEY) || DEFAULT_SHEET_URL;
+    if (url) return 'google_sheet';
     if (localStorage.getItem(LOCAL_DATA_KEY)) return 'local_file';
     return 'demo';
 };
