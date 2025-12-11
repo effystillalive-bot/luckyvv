@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Save, FileSpreadsheet, Upload, Trash2, CheckCircle, AlertCircle, Database, Download, FileJson, Info, AlertTriangle, RefreshCw, Zap, Play } from 'lucide-react';
-import { getSheetUrl, saveSheetUrl, processFile, getDataSourceType, clearLocalData, fetchData, getManualEntries, saveGoogleScriptUrl, getGoogleScriptUrl, testGoogleSheetConnection } from '../services/dataService';
+import { Save, FileSpreadsheet, Upload, Trash2, CheckCircle, AlertCircle, Database, Download, FileJson, Info, AlertTriangle, RefreshCw, Zap, Play, Activity } from 'lucide-react';
+import { getSheetUrl, saveSheetUrl, processFile, getDataSourceType, clearLocalData, fetchData, getManualEntries, saveGoogleScriptUrl, getGoogleScriptUrl, testGoogleSheetConnection, checkSyncStatus } from '../services/dataService';
 
 declare const XLSX: any;
 
@@ -16,11 +16,13 @@ const Settings: React.FC = () => {
   // Test Connection State
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testResult, setTestResult] = useState({ message: '', count: 0 });
+  const [syncStatus, setSyncStatus] = useState({ read: false, write: false });
 
   useEffect(() => {
     setUrl(getSheetUrl());
     setScriptUrl(getGoogleScriptUrl());
     setSourceType(getDataSourceType());
+    setSyncStatus(checkSyncStatus());
   }, []);
 
   const handleUrlSave = () => {
@@ -47,6 +49,7 @@ const Settings: React.FC = () => {
     
     saveGoogleScriptUrl(scriptUrl);
     setScriptSaved(true);
+    setSyncStatus(checkSyncStatus()); // Re-check
     setTimeout(() => setScriptSaved(false), 2000);
   };
 
@@ -118,11 +121,29 @@ const Settings: React.FC = () => {
              </button>
         </div>
         
-        <div className="mt-4 inline-flex items-center px-3 py-1 rounded-full bg-slate-900 border border-slate-700 text-sm">
-            <span className="text-slate-400 mr-2">Current Source:</span>
-            {sourceType === 'local_file' && <span className="text-emerald-500 font-bold flex items-center"><FileSpreadsheet className="w-4 h-4 mr-1"/> Uploaded File</span>}
-            {sourceType === 'google_sheet' && <span className="text-primary-500 font-bold flex items-center"><FileSpreadsheet className="w-4 h-4 mr-1"/> Google Sheet</span>}
-            {sourceType === 'demo' && <span className="text-accent-500 font-bold">Demo Mode</span>}
+        <div className="mt-4 flex flex-wrap gap-4 items-center">
+            <div className="inline-flex items-center px-3 py-1 rounded-full bg-slate-900 border border-slate-700 text-sm">
+                <span className="text-slate-400 mr-2">Current Source:</span>
+                {sourceType === 'local_file' && <span className="text-emerald-500 font-bold flex items-center"><FileSpreadsheet className="w-4 h-4 mr-1"/> Uploaded File</span>}
+                {sourceType === 'google_sheet' && <span className="text-primary-500 font-bold flex items-center"><FileSpreadsheet className="w-4 h-4 mr-1"/> Google Sheet</span>}
+                {sourceType === 'demo' && <span className="text-accent-500 font-bold">Demo Mode</span>}
+            </div>
+
+            {/* Sync Health Indicator */}
+            <div className={`inline-flex items-center px-3 py-1 rounded-full border text-sm ${syncStatus.read && syncStatus.write ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' : 'bg-slate-900 border-slate-700 text-slate-500'}`}>
+                <Activity className="w-4 h-4 mr-2" />
+                <span className="mr-2">Two-Way Sync:</span>
+                {syncStatus.read && syncStatus.write ? (
+                    <span className="font-bold flex items-center">Active <CheckCircle className="w-3 h-3 ml-1" /></span>
+                ) : (
+                    <span className="flex items-center">
+                        Partial 
+                        <span className="text-xs ml-1 opacity-70">
+                            ({syncStatus.read ? 'Read Only' : 'No Connection'})
+                        </span>
+                    </span>
+                )}
+            </div>
         </div>
       </div>
 
@@ -130,7 +151,7 @@ const Settings: React.FC = () => {
       <div className={`bg-slate-900 border rounded-xl p-6 shadow-lg transition-all ${sourceType === 'google_sheet' ? 'border-primary-500 ring-1 ring-primary-500/20' : 'border-slate-800'}`}>
         <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
             <FileSpreadsheet className="w-5 h-5 mr-2 text-primary-500" />
-            Google Sheet Connection (Read Only)
+            Google Sheet Connection (Read Data)
         </h2>
         
         <div className="bg-slate-950/50 p-4 rounded-lg text-sm text-slate-400 border border-slate-700/50 mb-6">
@@ -146,15 +167,6 @@ const Settings: React.FC = () => {
                     </ol>
                     <p className="text-xs text-slate-500 italic">
                         Updates using this method are nearly instant.
-                    </p>
-                 </div>
-             </div>
-             <div className="mt-4 pt-4 border-t border-slate-800 flex items-start gap-3 opacity-75">
-                 <Info className="w-5 h-5 text-slate-500 shrink-0 mt-0.5" />
-                 <div>
-                    <p className="font-semibold text-slate-400 mb-1">Alternative: Publish to Web (Cached)</p>
-                    <p className="text-slate-500">
-                        You can also use "File &gt; Share &gt; Publish to web (CSV)". However, Google caches this data, so updates may be <strong>delayed by 5-10 minutes</strong>.
                     </p>
                  </div>
              </div>
@@ -223,7 +235,7 @@ const Settings: React.FC = () => {
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg">
         <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
             <Database className="w-5 h-5 mr-2 text-purple-500" />
-            Automatic Google Sheet Backup (Write Access)
+            Automatic Google Sheet Backup (Write Data)
         </h2>
         
         <div className="space-y-4">
@@ -232,7 +244,7 @@ const Settings: React.FC = () => {
                 <ol className="list-decimal list-inside space-y-1 ml-1">
                     <li>Open your Google Sheet.</li>
                     <li>Go to <strong>Extensions {'>'} Apps Script</strong>.</li>
-                    <li>Paste the backup script.</li>
+                    <li>Paste the backup script provided.</li>
                     <li>Click <strong>Deploy {'>'} New deployment {'>'} Web App</strong>.</li>
                     <li>Set "Who has access" to <strong>"Anyone"</strong>.</li>
                     <li>Copy the URL (starts with script.google.com) and paste it below.</li>

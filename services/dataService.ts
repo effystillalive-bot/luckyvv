@@ -269,6 +269,16 @@ export const syncBatchToGoogleSheet = async (records: AthleteData[], onProgress?
     }
 };
 
+// Check if both Read and Write are configured for 2-way sync
+export const checkSyncStatus = (): { read: boolean, write: boolean } => {
+    const readUrl = localStorage.getItem(SETTINGS_KEY);
+    const writeUrl = getGoogleScriptUrl();
+    return {
+        read: !!(readUrl && readUrl.includes('google.com/spreadsheets')),
+        write: !!(writeUrl && writeUrl.startsWith('http'))
+    };
+};
+
 // --- End Google Sheet Integration ---
 
 // Manual Data Management

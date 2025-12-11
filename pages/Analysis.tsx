@@ -15,6 +15,7 @@ const Analysis: React.FC = () => {
   const [rawData, setRawData] = useState<AthleteData[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAthleteId, setSelectedAthleteId] = useState<string>('');
+  const [lastSynced, setLastSynced] = useState<Date>(new Date());
   
   // Layout State
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -43,20 +44,25 @@ const Analysis: React.FC = () => {
   const contentRef = useRef<HTMLDivElement>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
 
-  const loadData = async () => {
+  const loadData = async (isBackgroundRefresh = false) => {
       const data = await fetchData();
-      setRawData(data);
+      
       // Sort data by date ascending
       data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       
-      const savedOrder = getAthleteOrder();
-      setAthleteOrder(savedOrder);
+      setRawData(data);
+      setLastSynced(new Date());
 
+      if (!isBackgroundRefresh) {
+          const savedOrder = getAthleteOrder();
+          setAthleteOrder(savedOrder);
+      }
       return data;
   };
 
   useEffect(() => {
-    loadData().then((data) => {
+    // Initial Load
+    loadData(false).then((data) => {
       // Default selection if none
       if (data.length > 0 && !selectedAthleteId) {
         setSelectedAthleteId(data[0].id);
@@ -69,6 +75,16 @@ const Analysis: React.FC = () => {
       }
       setLoading(false);
     });
+
+    // Auto-refresh Polling (every 30 seconds)
+    const interval = setInterval(() => {
+        // Only refresh if not actively dragging or in modal to avoid jitter
+        if (!isAddModalOpen && !draggedItemIndex) {
+            loadData(true);
+        }
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Sync Athlete General Note
@@ -132,7 +148,7 @@ const Analysis: React.FC = () => {
   const handleDeleteRecord = async (record: AthleteData) => {
       if (window.confirm(`Delete record for ${record.date}? This cannot be undone.`)) {
           deleteSpecificEntry(record.id, record.date);
-          await loadData(); // Reload
+          await loadData(false); // Reload
       }
   };
 
@@ -140,7 +156,7 @@ const Analysis: React.FC = () => {
       event.stopPropagation(); // Prevent selection
       if (window.confirm(`Are you sure you want to delete this athlete and ALL their data?`)) {
           deleteAthleteProfile(athleteId);
-          await loadData();
+          await loadData(false);
           if (selectedAthleteId === athleteId) {
               setSelectedAthleteId('');
           }
@@ -487,6 +503,12 @@ const Analysis: React.FC = () => {
                             </span>
                         )}
                      </h2>
+                     {currentRecord && (
+                        <p className="text-xs text-slate-500 flex items-center mt-1">
+                            <RefreshCw className="w-3 h-3 mr-1" />
+                            Auto-syncing (Last: {lastSynced.toLocaleTimeString()})
+                        </p>
+                     )}
                 </div>
                 
                 <div className="flex flex-nowrap items-center gap-2 lg:gap-3 overflow-x-auto w-full lg:w-auto">

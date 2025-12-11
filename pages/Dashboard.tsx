@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Users, TrendingUp, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Users, TrendingUp, AlertTriangle, ArrowRight, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { fetchData } from '../services/dataService';
 import { AthleteData } from '../types';
@@ -9,12 +9,25 @@ import { METRICS } from '../constants';
 const Dashboard: React.FC = () => {
   const [data, setData] = useState<AthleteData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastSynced, setLastSynced] = useState<Date>(new Date());
+
+  const loadDashboardData = async () => {
+      const fetchedData = await fetchData();
+      setData(fetchedData);
+      setLastSynced(new Date());
+      setLoading(false);
+  };
 
   useEffect(() => {
-    fetchData().then(fetchedData => {
-      setData(fetchedData);
-      setLoading(false);
-    });
+    // Initial fetch
+    loadDashboardData();
+
+    // Auto-refresh every 30 seconds to simulate real-time sync from Google Sheet
+    const interval = setInterval(() => {
+        loadDashboardData();
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Process data to find the latest record for each athlete
@@ -60,9 +73,15 @@ const Dashboard: React.FC = () => {
             <h1 className="text-2xl font-bold text-white">Team Overview</h1>
             <p className="text-slate-400 text-sm">Aggregated performance data for all athletes.</p>
         </div>
-        <div className="flex items-center text-sm text-slate-400 bg-slate-900 px-3 py-1 rounded border border-slate-800">
-           <div className="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse"></div>
-           System Status: Online
+        <div className="flex flex-col items-end gap-1">
+             <div className="flex items-center text-sm text-slate-400 bg-slate-900 px-3 py-1 rounded border border-slate-800">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse"></div>
+                System Status: Online
+             </div>
+             <p className="text-xs text-slate-600 flex items-center">
+                 <RefreshCw className="w-3 h-3 mr-1" />
+                 Last synced: {lastSynced.toLocaleTimeString()}
+             </p>
         </div>
       </div>
 
