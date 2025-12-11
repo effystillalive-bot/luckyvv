@@ -72,5 +72,103 @@
   <body>
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
+    <p>
+        同步狀態: <span id="last-sync-indicator">正在初始化...</span>
+    </p>
+
+    <script>
+        
+        /**
+         * =========================================================
+         * 前端 JavaScript 程式碼 (客戶端)
+         * =========================================================
+         */
+
+        // --------------------------------------------------------
+        // 步驟 1: 配置您的 Apps Script Web App URL
+        // --------------------------------------------------------
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwh9gkeMqsJQ_yfYABTBQGb1OE3RqLMfnzxmpJnvf_E_HyH7_jHuMD6zGb1m3JUM-I/exec'; 
+        const SYNC_INTERVAL_MS = 300000; // 5 分鐘
+
+        // --------------------------------------------------------
+        // 步驟 2: 執行數據拉取 (輪詢) 函數
+        // --------------------------------------------------------
+        function fetchSpreadsheetData() {
+            console.log(`[SYNC] 正在向 Apps Script URL 發送 GET 請求...`);
+
+            fetch(APPS_SCRIPT_URL, {
+                method: 'GET', 
+                headers: {
+                    'Content-Type': 'application/json' 
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    console.error(`[SYNC ERROR] HTTP 狀態碼錯誤: ${response.status}`);
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json(); 
+            })
+            .then(data => {
+                if (data.error) {
+                    console.error('[SYNC ERROR] Apps Script 內部錯誤:', data.error);
+                    return;
+                }
+
+                console.log('[SYNC SUCCESS] 數據拉取成功，共', data.data.length, '筆紀錄。');
+                
+                // 核心同步邏輯：使用拉取到的數據更新您的應用程式介面
+                updateApplicationUI(data.data); 
+                // 更新上次同步時間戳
+                updateSyncIndicator(data.lastSync);
+            })
+            .catch(error => {
+                console.error('[SYNC FAILED] 數據輪詢錯誤:', error);
+            });
+        }
+
+
+        // --------------------------------------------------------
+        // 步驟 3: 定時啟動輪詢與 UI 更新
+        // --------------------------------------------------------
+        // 由於程式碼已在底部，DOMContentLoaded 雖然不是絕對必需，但保持邏輯的穩定性
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('[SYNC] 應用程式啟動，首次數據同步...');
+            fetchSpreadsheetData();
+            
+            // 設定定時輪詢 (每 5 分鐘)
+            setInterval(fetchSpreadsheetData, SYNC_INTERVAL_MS);
+        });
+
+
+        // =========================================================
+        // 步驟 4: 實作 UI 更新函數 (您必須根據您的頁面結構來調整)
+        // =========================================================
+
+        /**
+         * 負責將 Google Sheets 數據應用到應用程式介面的函數。
+         * * @param {Array<Object>} sheetsData - 從 Apps Script 獲取到的 JSON 數據陣列。
+         */
+        function updateApplicationUI(sheetsData) {
+            // !!! 在這裡填寫您的邏輯，例如更新圖表或列表 !!!
+        }
+
+        /**
+         * 更新同步狀態指示器。
+         * * @param {string} isoString - Apps Script 返回的 ISO 格式時間字串。
+         */
+        function updateSyncIndicator(isoString) {
+            const timestamp = new Date(isoString);
+            const timeString = timestamp.toLocaleTimeString(); 
+            
+            const indicatorElement = document.getElementById('last-sync-indicator'); 
+            if (indicatorElement) {
+                indicatorElement.textContent = `上次同步: ${timeString}`;
+                indicatorElement.style.color = 'green';
+            }
+        }
+    </script>
+    </body>
+</html>
   </body>
 </html>
