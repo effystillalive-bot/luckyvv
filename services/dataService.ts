@@ -52,17 +52,56 @@ const mapRowToAthlete = (getVal: (search: string) => string | null): AthleteData
 
 // Helper to parse CSV string into objects
 const parseCSV = (csvText: string): AthleteData[] => {
+  // Security check: If response is HTML, it's likely a login page or 403 error
+  if (!csvText || csvText.trim().startsWith('<!DOCTYPE') || csvText.trim().startsWith('<html')) {
+      console.warn("CSV content appears to be HTML (likely login page or error).");
+      return [];
+  }
+
+  // Robust CSV parsing using XLSX to handle quoted strings (e.g. "Note, with comma")
+  if (typeof XLSX !== 'undefined') {
+      try {
+          const workbook = XLSX.read(csvText, { type: 'string' });
+          const sheetName = workbook.SheetNames[0];
+          const sheet = workbook.Sheets[sheetName];
+          const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+          
+          if (json.length > 0) {
+              const rows = json as any[][];
+              // Smart Header Detection
+              let headerRowIndex = 0;
+              for(let i=0; i < Math.min(rows.length, 10); i++) {
+                 const rowStr = rows[i].join(' ').toLowerCase();
+                 if (rowStr.includes('name') && (rowStr.includes('date') || rowStr.includes('jh'))) {
+                     headerRowIndex = i;
+                     break;
+                 }
+              }
+
+              const headers = (rows[headerRowIndex] as any[]).map(h => String(h));
+              const dataRows = rows.slice(headerRowIndex + 1);
+
+              return dataRows.map((values) => {
+                  const getVal = (search: string) => {
+                      const idx = headers.findIndex(h => h.toLowerCase().includes(search.toLowerCase()));
+                      return idx !== -1 && values[idx] !== undefined ? String(values[idx]).trim() : null;
+                  };
+                  return mapRowToAthlete(getVal);
+              }).filter(d => d.name && d.date && d.name !== 'Unknown');
+          }
+      } catch (e) {
+          console.error("XLSX parse error on CSV, falling back to simple split", e);
+      }
+  }
+
+  // Fallback: Simple split (Fragile with quoted commas)
   const lines = csvText.trim().split('\n');
   if (lines.length < 2) return [];
 
   const headers = lines[0].split(',').map(h => h.trim());
 
   return lines.slice(1).map((line, index) => {
-    // Basic CSV split, handling simple commas. 
-    // For complex CSVs with quoted commas, a more robust parser is needed, but this suffices for typical sheets.
     const values = line.split(','); 
-    
-    // Skip empty lines
     if (values.length < 2) return null;
 
     const getVal = (search: string) => {
@@ -86,12 +125,9 @@ export const parseFile = (file: File): Promise<AthleteData[]> => {
                 let parsedData: AthleteData[] = [];
 
                 if (isExcel) {
-                    // Handle Excel
                     if (typeof XLSX === 'undefined') {
                         throw new Error("XLSX library not loaded. Please refresh.");
                     }
-                    
-                    // Read data as array for robustness
                     const workbook = XLSX.read(data, { type: 'array' });
                     const sheetName = workbook.SheetNames[0];
                     const sheet = workbook.Sheets[sheetName];
@@ -99,8 +135,6 @@ export const parseFile = (file: File): Promise<AthleteData[]> => {
                     
                     if (json.length > 0) {
                         const rows = json as any[][];
-                        
-                        // Smart Header Detection: Find the row that likely contains headers (contains 'name' and 'date' or 'jh')
                         let headerRowIndex = 0;
                         for(let i=0; i < Math.min(rows.length, 10); i++) {
                             const rowStr = rows[i].join(' ').toLowerCase();
@@ -124,19 +158,14 @@ export const parseFile = (file: File): Promise<AthleteData[]> => {
                 } else if (file.name.toLowerCase().endsWith('.json')) {
                     const textData = data as string;
                     let jsonData = JSON.parse(textData);
-                    
-                    // Handle wrapped JSON e.g. { data: [...] }
                     if (!Array.isArray(jsonData) && typeof jsonData === 'object') {
                         const possibleArray = Object.values(jsonData).find(val => Array.isArray(val));
-                        if (possibleArray) {
-                            jsonData = possibleArray;
-                        }
+                        if (possibleArray) jsonData = possibleArray;
                     }
 
                     if (Array.isArray(jsonData)) {
                         parsedData = jsonData.map((item: any) => {
                             const getVal = (key: string) => {
-                                // Loose key matching
                                 const foundKey = Object.keys(item).find(k => k.toLowerCase().includes(key.toLowerCase()));
                                 return foundKey ? String(item[foundKey]) : null;
                             };
@@ -162,7 +191,6 @@ export const parseFile = (file: File): Promise<AthleteData[]> => {
     });
 };
 
-// Process uploaded file (CSV or Excel) for Settings (Overwrites Local Data)
 export const processFile = async (file: File): Promise<void> => {
     const data = await parseFile(file);
     if (data.length > 0) {
@@ -176,6 +204,8 @@ export const clearLocalData = () => {
 
 // Helper to convert Google Sheet URL to CSV Export URL
 const convertToExportUrl = (url: string): string => {
+    if (!url) return '';
+    
     // 1. Check if it's already a publish-to-web CSV link
     if (url.includes('output=csv') || url.includes('format=csv')) return url;
 
@@ -185,7 +215,6 @@ const convertToExportUrl = (url: string): string => {
     const id = idMatch[1];
 
     // 3. Extract GID (Sheet ID)
-    // Priority: Query param (?gid=), then Fragment (#gid=), then default '0'
     let gid = '0';
     const queryGidMatch = url.match(/[?&]gid=([0-9]+)/);
     const hashGidMatch = url.match(/#gid=([0-9]+)/);
@@ -197,7 +226,8 @@ const convertToExportUrl = (url: string): string => {
     }
 
     // Construct the export URL
-    // Note: The sheet MUST be "Published to Web" as CSV for this to work robustly via Fetch API due to CORS.
+    // Note: Use 'export' endpoint for Shared sheets (Anyone with link) - Faster updates
+    // Note: Use 'pub' endpoint for Published sheets - Cached updates
     return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
 };
 
@@ -216,13 +246,10 @@ export const backupToGoogleSheet = async (record: AthleteData): Promise<boolean>
     if (!scriptUrl) return false;
 
     try {
-        // Send data as text/plain to avoid CORS preflight complications with GAS
         await fetch(scriptUrl, {
             method: 'POST',
-            mode: 'no-cors', // 'no-cors' is often required for GAS Web Apps called from client-side
-            headers: {
-                'Content-Type': 'text/plain',
-            },
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'text/plain' },
             body: JSON.stringify(record)
         });
         return true;
@@ -239,7 +266,6 @@ export const syncBatchToGoogleSheet = async (records: AthleteData[], onProgress?
     for (let i = 0; i < records.length; i++) {
         await backupToGoogleSheet(records[i]);
         if (onProgress) onProgress(i + 1);
-        // Small delay to be nice to GAS quotas and prevent 429 errors
         await new Promise(r => setTimeout(r, 500));
     }
 };
@@ -251,7 +277,6 @@ export const addManualEntry = (entry: AthleteData) => {
     const manualDataStr = localStorage.getItem(MANUAL_DATA_KEY);
     const manualData: AthleteData[] = manualDataStr ? JSON.parse(manualDataStr) : [];
     
-    // Check if entry exists (same ID and Date) and update it, or append new
     const existingIndex = manualData.findIndex(d => d.id === entry.id && d.date === entry.date);
     if (existingIndex >= 0) {
         manualData[existingIndex] = entry;
@@ -262,7 +287,6 @@ export const addManualEntry = (entry: AthleteData) => {
     localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(manualData));
 };
 
-// Batch Add Manual Entries (Merge logic)
 export const batchAddManualEntries = (entries: AthleteData[]) => {
     const manualDataStr = localStorage.getItem(MANUAL_DATA_KEY);
     let manualData: AthleteData[] = manualDataStr ? JSON.parse(manualDataStr) : [];
@@ -270,9 +294,9 @@ export const batchAddManualEntries = (entries: AthleteData[]) => {
     entries.forEach(entry => {
         const existingIndex = manualData.findIndex(d => d.id === entry.id && d.date === entry.date);
         if (existingIndex >= 0) {
-            manualData[existingIndex] = entry; // Update
+            manualData[existingIndex] = entry; 
         } else {
-            manualData.push(entry); // Insert
+            manualData.push(entry); 
         }
     });
     
@@ -291,7 +315,6 @@ export const clearManualData = () => {
 // --- Deletion & Sorting Features ---
 
 export const deleteSpecificEntry = (athleteId: string, date: string) => {
-    // 1. Remove from Local File Data
     const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
     if (localDataStr) {
         let localData: AthleteData[] = JSON.parse(localDataStr);
@@ -299,7 +322,6 @@ export const deleteSpecificEntry = (athleteId: string, date: string) => {
         localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(localData));
     }
 
-    // 2. Remove from Manual Data
     const manualDataStr = localStorage.getItem(MANUAL_DATA_KEY);
     if (manualDataStr) {
         let manualData: AthleteData[] = JSON.parse(manualDataStr);
@@ -309,7 +331,6 @@ export const deleteSpecificEntry = (athleteId: string, date: string) => {
 };
 
 export const deleteAthleteProfile = (athleteId: string) => {
-    // 1. Remove from Local Data
     const localDataStr = localStorage.getItem(LOCAL_DATA_KEY);
     if (localDataStr) {
         let localData: AthleteData[] = JSON.parse(localDataStr);
@@ -317,7 +338,6 @@ export const deleteAthleteProfile = (athleteId: string) => {
         localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(localData));
     }
 
-    // 2. Remove from Manual Data
     const manualDataStr = localStorage.getItem(MANUAL_DATA_KEY);
     if (manualDataStr) {
         let manualData: AthleteData[] = JSON.parse(manualDataStr);
@@ -325,12 +345,10 @@ export const deleteAthleteProfile = (athleteId: string) => {
         localStorage.setItem(MANUAL_DATA_KEY, JSON.stringify(manualData));
     }
 
-    // 3. Remove Notes
     const athleteNotes = getAthleteNotes();
     delete athleteNotes[athleteId];
     localStorage.setItem(ATHLETE_NOTES_KEY, JSON.stringify(athleteNotes));
 
-    // 4. Remove from Sort Order
     let order = getAthleteOrder();
     order = order.filter(id => id !== athleteId);
     saveAthleteOrder(order);
@@ -344,8 +362,6 @@ export const getAthleteOrder = (): string[] => {
     const str = localStorage.getItem(ATHLETE_ORDER_KEY);
     return str ? JSON.parse(str) : [];
 };
-
-// --- End Deletion & Sorting ---
 
 export const fetchData = async (): Promise<AthleteData[]> => {
   let baseData: AthleteData[] = [];
@@ -366,17 +382,21 @@ export const fetchData = async (): Promise<AthleteData[]> => {
     if (sheetUrl && sheetUrl.includes('google.com/spreadsheets')) {
         try {
             const fetchUrl = convertToExportUrl(sheetUrl);
-            // Add Cache Busting Parameter to prevent browser from serving stale data
             const separator = fetchUrl.includes('?') ? '&' : '?';
             const cacheBuster = `t=${new Date().getTime()}`;
             const finalUrl = `${fetchUrl}${separator}${cacheBuster}`;
 
             const response = await fetch(finalUrl);
             if (response.ok) {
-                csvData = await response.text();
+                const text = await response.text();
+                // Check if text is HTML (login page redirect or error)
+                if (text.trim().startsWith('<')) {
+                    console.warn(`Fetched data appears to be HTML. Likely a permission issue or invalid link.`);
+                } else {
+                    csvData = text;
+                }
             } else {
-                console.warn(`Failed to fetch Google Sheet: ${response.status} ${response.statusText}`);
-                console.warn('Ensure the Sheet is "Published to Web" as CSV. "Edit" links typically fail due to CORS.');
+                console.warn(`Failed to fetch Google Sheet: ${response.status}`);
             }
         } catch (error) {
             console.error("Error fetching Google Sheet:", error);
@@ -387,11 +407,10 @@ export const fetchData = async (): Promise<AthleteData[]> => {
 
   // 3. Merge with Manual Data
   const manualData = getManualEntries();
-  
   const dataMap = new Map<string, AthleteData>();
   
   baseData.forEach(d => dataMap.set(`${d.id}_${d.date}`, d));
-  manualData.forEach(d => dataMap.set(`${d.id}_${d.date}`, d)); // Manual overrides
+  manualData.forEach(d => dataMap.set(`${d.id}_${d.date}`, d)); 
   
   const mergedData = Array.from(dataMap.values());
   const notes = getNotes();
@@ -404,6 +423,35 @@ export const fetchData = async (): Promise<AthleteData[]> => {
     };
   });
 };
+
+export const testGoogleSheetConnection = async (url: string): Promise<{success: boolean, message: string, count: number}> => {
+    if (!url) return { success: false, message: "No URL provided", count: 0 };
+    
+    try {
+        const fetchUrl = convertToExportUrl(url);
+        const cacheBuster = `t=${new Date().getTime()}`;
+        const separator = fetchUrl.includes('?') ? '&' : '?';
+        const finalUrl = `${fetchUrl}${separator}${cacheBuster}`;
+        
+        const response = await fetch(finalUrl);
+        if (!response.ok) {
+            return { success: false, message: `HTTP Error: ${response.status} ${response.statusText}`, count: 0 };
+        }
+        const text = await response.text();
+        if (text.trim().startsWith('<')) {
+             return { success: false, message: "Error: URL returned HTML. Please check 'Share' settings (Anyone with link).", count: 0 };
+        }
+        
+        const data = parseCSV(text);
+        if (data.length === 0) {
+            return { success: false, message: "Connection successful, but found 0 valid athlete records.", count: 0 };
+        }
+        
+        return { success: true, message: `Success! Found ${data.length} records.`, count: data.length };
+    } catch (e: any) {
+        return { success: false, message: `Fetch Error: ${e.message}`, count: 0 };
+    }
+}
 
 export const saveSheetUrl = (url: string) => {
   localStorage.setItem(SETTINGS_KEY, url);
@@ -436,7 +484,6 @@ export const getNotes = (): Record<string, string> => {
   return str ? JSON.parse(str) : {};
 };
 
-// General Athlete Notes (Profile level)
 export const saveAthleteNote = (athleteId: string, note: string) => {
     const notes = getAthleteNotes();
     notes[athleteId] = note;
