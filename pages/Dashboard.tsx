@@ -13,7 +13,7 @@ import {
   Tooltip, 
   Legend 
 } from 'recharts';
-import { fetchData } from '../services/dataService';
+import { fetchData, getAthleteOrder } from '../services/dataService';
 import { AthleteData } from '../types';
 import ChartSection from '../components/ChartSection';
 import { METRICS } from '../constants';
@@ -60,15 +60,6 @@ const Dashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Set default selection (Top 5 by JH) once data is loaded
-  useEffect(() => {
-      if (!loading && data.length > 0 && selectedAthletes.length === 0) {
-          const latest = getLatestRecords();
-          const top5 = latest.slice(0, 5).map(a => a.id);
-          setSelectedAthletes(top5);
-      }
-  }, [loading, data]);
-
   // Process data to find the latest record for each athlete
   const getLatestRecords = () => {
     const latestMap = new Map<string, AthleteData>();
@@ -78,7 +69,7 @@ const Dashboard: React.FC = () => {
             latestMap.set(record.id, record);
         }
     });
-    return Array.from(latestMap.values()).sort((a, b) => b.jh - a.jh);
+    return Array.from(latestMap.values()); // Order will be handled by availableAthletes
   };
 
   const latestRecords = useMemo(() => getLatestRecords(), [data]);
@@ -86,15 +77,40 @@ const Dashboard: React.FC = () => {
   // --- Comparison Logic ---
 
   const availableAthletes = useMemo(() => {
-      return latestRecords
+      let list = latestRecords
           .filter(a => a.name.toLowerCase().includes(athleteSearch.toLowerCase()))
           .map(a => ({ id: a.id, name: a.name }));
+      
+      // Sync Sort Order with Analysis Page
+      const order = getAthleteOrder();
+      if (order.length > 0) {
+           list.sort((a, b) => {
+               const idxA = order.indexOf(a.id);
+               const idxB = order.indexOf(b.id);
+               if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+               if (idxA !== -1) return -1;
+               if (idxB !== -1) return 1;
+               return a.name.localeCompare(b.name);
+           });
+      } else {
+           // Default Alpha sort if no custom order
+           list.sort((a, b) => a.name.localeCompare(b.name));
+      }
+
+      return list;
   }, [latestRecords, athleteSearch]);
+
+  // Set default selection (ALL Athletes) once data is loaded
+  useEffect(() => {
+      if (!loading && availableAthletes.length > 0 && selectedAthletes.length === 0) {
+          // Default to ALL sorted athletes
+          setSelectedAthletes(availableAthletes.map(a => a.id));
+      }
+  }, [loading, availableAthletes]);
 
   const toggleAthleteSelection = (id: string) => {
       setSelectedAthletes(prev => {
           if (prev.includes(id)) return prev.filter(x => x !== id);
-          if (prev.length >= 10) return prev; // Limit to 10 for chart readability
           return [...prev, id];
       });
   };
@@ -118,8 +134,25 @@ const Dashboard: React.FC = () => {
   }, [data, selectedAthletes, comparisonMetric]);
 
   // Prepare Snapshot Data (Latest values for selected athletes)
+  // Sort snapshot data to match the visual list order (based on availableAthletes order)
   const comparisonSnapshotData = useMemo(() => {
-      return latestRecords.filter(r => selectedAthletes.includes(r.id));
+      const records = latestRecords.filter(r => selectedAthletes.includes(r.id));
+      
+      // Apply the same sort order as the list
+      const order = getAthleteOrder();
+      if (order.length > 0) {
+          records.sort((a, b) => {
+              const idxA = order.indexOf(a.id);
+              const idxB = order.indexOf(b.id);
+              if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+              if (idxA !== -1) return -1;
+              if (idxB !== -1) return 1;
+              return a.name.localeCompare(b.name);
+          });
+      } else {
+          records.sort((a, b) => a.name.localeCompare(b.name));
+      }
+      return records;
   }, [latestRecords, selectedAthletes]);
 
   // Color palette for lines
@@ -224,8 +257,8 @@ const Dashboard: React.FC = () => {
             <div className="space-y-3">
                 <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700">
                     <p className="text-xs text-slate-400 uppercase font-bold mb-1">Top Performer (JH)</p>
-                    <p className="text-white font-medium">{latestRecords[0]?.name || '-'}</p>
-                    <p className="text-emerald-500 text-sm">{latestRecords[0]?.jh} cm</p>
+                    <p className="text-white font-medium">{latestRecords.slice().sort((a,b) => b.jh - a.jh)[0]?.name || '-'}</p>
+                    <p className="text-emerald-500 text-sm">{latestRecords.slice().sort((a,b) => b.jh - a.jh)[0]?.jh} cm</p>
                 </div>
                 <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700">
                      <p className="text-xs text-slate-400 uppercase font-bold mb-1">Highest mRSI</p>
@@ -432,7 +465,7 @@ const Dashboard: React.FC = () => {
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                    {latestRecords.map((record, i) => (
+                    {comparisonSnapshotData.map((record, i) => (
                         <tr key={i} className="hover:bg-slate-800/50 transition-colors group">
                             <td className="px-6 py-4 font-bold text-white group-hover:text-primary-400 transition-colors">
                                 {record.name}
