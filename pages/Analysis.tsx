@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Search, Save, FileText, Calendar, User, ChevronLeft, ChevronRight, FileSpreadsheet, Download, FileJson, Trash2, GripVertical, Settings2, Check, Plus, X, Activity, RefreshCw, Edit2, XCircle } from 'lucide-react';
+import { Search, Save, FileText, Calendar, User, ChevronLeft, ChevronRight, FileSpreadsheet, Download, FileJson, Trash2, GripVertical, Settings2, Check, Plus, X, Activity, RefreshCw, Edit2, XCircle, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { fetchData, saveNote, saveAthleteNote, getAthleteNotes, deleteSpecificEntry, deleteAthleteProfile, saveAthleteOrder, getAthleteOrder, addManualEntry, backupToGoogleSheet } from '../services/dataService';
 import { AthleteData } from '../types';
 import ChartSection from '../components/ChartSection';
@@ -25,6 +25,9 @@ const Analysis: React.FC = () => {
   // Filtering State
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   
+  // Sorting State for Table
+  const [sortConfig, setSortConfig] = useState<{ key: 'date' | 'name', direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+
   // Notes State
   const [editingNote, setEditingNote] = useState<{id: string, date: string, text: string} | null>(null);
   const [athleteNote, setAthleteNote] = useState<string>('');
@@ -36,7 +39,7 @@ const Analysis: React.FC = () => {
   const [editForm, setEditForm] = useState<AthleteData | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   
-  // Sorting State
+  // Sorting State for Sidebar
   const [athleteOrder, setAthleteOrder] = useState<string[]>([]);
   const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
   
@@ -70,7 +73,7 @@ const Analysis: React.FC = () => {
       
       const data = await fetchData();
       
-      // Sort data by date ascending
+      // Initial sort by date ascending for charts
       data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       
       setRawData(data);
@@ -152,20 +155,37 @@ const Analysis: React.FC = () => {
       return athletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()));
   }, [athletes, searchTerm]);
 
-  const filteredData = useMemo(() => {
+  // Data for Charts (Always sorted by date ASC)
+  const chartData = useMemo(() => {
     if (!selectedAthleteId) return [];
-    
     return rawData.filter(d => {
       if (d.id !== selectedAthleteId) return false;
       if (!dateRange.start || !dateRange.end) return true;
-      
       const dTime = new Date(d.date).getTime();
       const sTime = new Date(dateRange.start).getTime();
       const eTime = new Date(dateRange.end).getTime();
-      
       return dTime >= sTime && dTime <= eTime;
-    });
+    }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [rawData, selectedAthleteId, dateRange]);
+
+  // Data for Table (Respects Sort Config)
+  const tableData = useMemo(() => {
+      const data = [...chartData]; // Start with filtered chart data
+      
+      return data.sort((a, b) => {
+          let comparison = 0;
+          if (sortConfig.key === 'date') {
+              comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+          } else {
+              comparison = a.name.localeCompare(b.name);
+              // Secondary sort by date if names are equal
+              if (comparison === 0) {
+                   comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+              }
+          }
+          return sortConfig.direction === 'asc' ? comparison : -comparison;
+      });
+  }, [chartData, sortConfig]);
 
   // --- Row Editing Handlers ---
 
@@ -275,6 +295,13 @@ const Analysis: React.FC = () => {
       saveAthleteOrder(athleteOrder);
   };
 
+  const toggleSort = (key: 'date' | 'name') => {
+      setSortConfig(current => ({
+          key,
+          direction: current.key === key && current.direction === 'desc' ? 'asc' : 'desc'
+      }));
+  };
+
   // --- Note Saving (Single Cell) ---
 
   const handleNoteSave = async (record: AthleteData, text: string) => {
@@ -362,7 +389,7 @@ const Analysis: React.FC = () => {
   // --- Export ---
 
   const handleExportCSV = () => {
-    if (filteredData.length === 0) return;
+    if (chartData.length === 0) return;
 
     const currentName = athletes.find(a => a.id === selectedAthleteId)?.name || 'Athlete';
     
@@ -375,7 +402,7 @@ const Analysis: React.FC = () => {
     const headers = ['Date', ...METRICS.map(m => m.label), 'Daily Note'];
     csvRows.push(headers.join(','));
 
-    [...filteredData].reverse().forEach(record => {
+    [...chartData].reverse().forEach(record => {
         const row = [
             record.date,
             ...METRICS.map(m => record[m.key] !== undefined ? record[m.key] : ''),
@@ -448,8 +475,8 @@ const Analysis: React.FC = () => {
 
   if (loading) return <div className="p-10 text-center text-slate-500">Loading Analysis...</div>;
 
-  const currentRecord = filteredData[filteredData.length - 1];
-  const previousRecord = filteredData[filteredData.length - 2];
+  const currentRecord = chartData[chartData.length - 1];
+  const previousRecord = chartData[chartData.length - 2];
 
   return (
     <div className="flex h-[calc(100vh-6rem)] md:h-[calc(100vh-4rem)] bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-2xl relative">
@@ -671,13 +698,13 @@ const Analysis: React.FC = () => {
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <ChartSection 
                                 title="Jump Height & Forces" 
-                                data={filteredData}
+                                data={chartData}
                                 metrics={METRICS.filter(m => ['jh', 'avgPropulsiveForce'].includes(m.key))}
                                 type="mixed"
                             />
                             <ChartSection 
                                 title="Propulsive RFD" 
-                                data={filteredData}
+                                data={chartData}
                                 metrics={METRICS.filter(m => ['propulsiveRfdSj'].includes(m.key))}
                             />
                         </div>
@@ -702,13 +729,13 @@ const Analysis: React.FC = () => {
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <ChartSection 
                                 title="Efficiency (mRSI) vs Time to Takeoff" 
-                                data={filteredData}
+                                data={chartData}
                                 metrics={METRICS.filter(m => ['mrsi', 'timeToTakeoff'].includes(m.key))}
                                 type="mixed"
                             />
                             <ChartSection 
                                 title="Landing & Braking" 
-                                data={filteredData}
+                                data={chartData}
                                 metrics={METRICS.filter(m => ['brakingRfdCmj', 'rsiDj'].includes(m.key))}
                             />
                         </div>
@@ -716,17 +743,43 @@ const Analysis: React.FC = () => {
 
                     {/* Data Table */}
                     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg mb-8">
-                        <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900">
+                        <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900 flex-wrap gap-4">
                             <h3 className="text-lg font-semibold text-white">Historical Data Log</h3>
-                            <div className="hidden sm:flex items-center gap-3 no-export text-xs text-slate-500">
-                                <span>Edit directly to update local & cloud data</span>
+                            
+                            {/* Sorting Controls */}
+                            <div className="flex items-center gap-2 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                                <span className="text-xs text-slate-500 font-medium px-2 uppercase">Sort by:</span>
+                                <button 
+                                    onClick={() => toggleSort('date')}
+                                    className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${sortConfig.key === 'date' ? 'bg-primary-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                                >
+                                    <Calendar className="w-3 h-3" />
+                                    Date
+                                    {sortConfig.key === 'date' && (
+                                        sortConfig.direction === 'desc' ? <ArrowDown className="w-3 h-3 ml-1" /> : <ArrowUp className="w-3 h-3 ml-1" />
+                                    )}
+                                </button>
+                                <button 
+                                    onClick={() => toggleSort('name')}
+                                    className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${sortConfig.key === 'name' ? 'bg-primary-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                                >
+                                    <User className="w-3 h-3" />
+                                    Name
+                                    {sortConfig.key === 'name' && (
+                                        sortConfig.direction === 'desc' ? <ArrowDown className="w-3 h-3 ml-1" /> : <ArrowUp className="w-3 h-3 ml-1" />
+                                    )}
+                                </button>
                             </div>
                         </div>
                         <div className="overflow-x-auto pb-2">
                             <table className="w-full text-left text-sm text-slate-400">
                                 <thead className="bg-slate-950 text-slate-200 uppercase font-medium text-xs">
                                     <tr>
-                                        <th className="px-4 py-3 sticky left-0 bg-slate-950 z-10 shadow-r min-w-[100px]">Date</th>
+                                        <th className="px-4 py-3 sticky left-0 bg-slate-950 z-10 shadow-r min-w-[100px]">
+                                            <div className="flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => toggleSort('date')}>
+                                                Date
+                                            </div>
+                                        </th>
                                         {METRICS.map(m => (
                                             <th key={m.key} className="px-4 py-3 whitespace-nowrap min-w-[100px]" style={{ color: m.color }}>{m.label}</th>
                                         ))}
@@ -735,7 +788,7 @@ const Analysis: React.FC = () => {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-800">
-                                    {[...filteredData].reverse().map((record) => {
+                                    {tableData.map((record) => {
                                         const recordKey = `${record.id}_${record.date}`;
                                         const isEditing = editingRow === recordKey;
 

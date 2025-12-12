@@ -29,6 +29,7 @@ const normalizeDate = (dateStr: string): string => {
     }
     if (dateStr.includes('/')) {
         const parts = dateStr.split('/');
+        // Handle YYYY/MM/DD
         if (parts[0].length === 4) {
              return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
         }
@@ -102,7 +103,7 @@ const parseCSV = (csvText: string): AthleteData[] => {
                   }
 
                   return mapRowToAthlete(getVal, nameFallback);
-              }).filter(d => d.name && d.date && d.name !== 'Unknown');
+              }).filter(d => d.name && d.date && d.name !== 'Unknown' && d.name.trim() !== '');
           }
       } catch (e) {
           console.error("XLSX parse error on CSV", e);
@@ -179,6 +180,9 @@ export const getGoogleScriptUrl = () => {
 export const backupToGoogleSheet = async (record: AthleteData): Promise<boolean> => {
     const scriptUrl = getGoogleScriptUrl();
     if (!scriptUrl) return false;
+    // Basic sanitization to prevent sending empty objects that might confuse some scripts
+    if (!record.name || !record.date) return false;
+
     try {
         const cleanRecord = JSON.parse(JSON.stringify(record));
         await fetch(scriptUrl, {
