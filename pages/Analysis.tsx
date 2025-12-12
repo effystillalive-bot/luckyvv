@@ -25,8 +25,8 @@ const Analysis: React.FC = () => {
   // Filtering State
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   
-  // Sorting State for Table
-  const [sortConfig, setSortConfig] = useState<{ key: 'date' | 'name', direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+  // Sorting State for Table (Date Only as requested)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // Notes State
   const [editingNote, setEditingNote] = useState<{id: string, date: string, text: string} | null>(null);
@@ -168,24 +168,15 @@ const Analysis: React.FC = () => {
     }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [rawData, selectedAthleteId, dateRange]);
 
-  // Data for Table (Respects Sort Config)
+  // Data for Table (Sorted by Date Direction)
   const tableData = useMemo(() => {
       const data = [...chartData]; // Start with filtered chart data
-      
       return data.sort((a, b) => {
-          let comparison = 0;
-          if (sortConfig.key === 'date') {
-              comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
-          } else {
-              comparison = a.name.localeCompare(b.name);
-              // Secondary sort by date if names are equal
-              if (comparison === 0) {
-                   comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
-              }
-          }
-          return sortConfig.direction === 'asc' ? comparison : -comparison;
+          const dateA = new Date(a.date).getTime();
+          const dateB = new Date(b.date).getTime();
+          return sortDirection === 'asc' ? dateA - dateB : dateB - dateA;
       });
-  }, [chartData, sortConfig]);
+  }, [chartData, sortDirection]);
 
   // --- Row Editing Handlers ---
 
@@ -295,11 +286,8 @@ const Analysis: React.FC = () => {
       saveAthleteOrder(athleteOrder);
   };
 
-  const toggleSort = (key: 'date' | 'name') => {
-      setSortConfig(current => ({
-          key,
-          direction: current.key === key && current.direction === 'desc' ? 'asc' : 'desc'
-      }));
+  const toggleSort = () => {
+      setSortDirection(prev => prev === 'desc' ? 'asc' : 'desc');
   };
 
   // --- Note Saving (Single Cell) ---
@@ -746,38 +734,28 @@ const Analysis: React.FC = () => {
                         <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900 flex-wrap gap-4">
                             <h3 className="text-lg font-semibold text-white">Historical Data Log</h3>
                             
-                            {/* Sorting Controls */}
-                            <div className="flex items-center gap-2 bg-slate-950 p-1 rounded-lg border border-slate-800">
-                                <span className="text-xs text-slate-500 font-medium px-2 uppercase">Sort by:</span>
-                                <button 
-                                    onClick={() => toggleSort('date')}
-                                    className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${sortConfig.key === 'date' ? 'bg-primary-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-                                >
-                                    <Calendar className="w-3 h-3" />
-                                    Date
-                                    {sortConfig.key === 'date' && (
-                                        sortConfig.direction === 'desc' ? <ArrowDown className="w-3 h-3 ml-1" /> : <ArrowUp className="w-3 h-3 ml-1" />
-                                    )}
-                                </button>
-                                <button 
-                                    onClick={() => toggleSort('name')}
-                                    className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${sortConfig.key === 'name' ? 'bg-primary-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-                                >
-                                    <User className="w-3 h-3" />
-                                    Name
-                                    {sortConfig.key === 'name' && (
-                                        sortConfig.direction === 'desc' ? <ArrowDown className="w-3 h-3 ml-1" /> : <ArrowUp className="w-3 h-3 ml-1" />
-                                    )}
-                                </button>
-                            </div>
+                            {/* Sorting Controls - DATE ONLY as requested */}
+                            <button 
+                                onClick={toggleSort}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-xs font-medium text-slate-300 transition-all group"
+                            >
+                                <Calendar className="w-3.5 h-3.5 text-primary-500" />
+                                <span>Sort by Date</span>
+                                {sortDirection === 'desc' ? (
+                                    <ArrowDown className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
+                                ) : (
+                                    <ArrowUp className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
+                                )}
+                            </button>
                         </div>
                         <div className="overflow-x-auto pb-2">
                             <table className="w-full text-left text-sm text-slate-400">
                                 <thead className="bg-slate-950 text-slate-200 uppercase font-medium text-xs">
                                     <tr>
                                         <th className="px-4 py-3 sticky left-0 bg-slate-950 z-10 shadow-r min-w-[100px]">
-                                            <div className="flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => toggleSort('date')}>
+                                            <div className="flex items-center gap-1 cursor-pointer hover:text-white" onClick={toggleSort}>
                                                 Date
+                                                {sortDirection === 'desc' ? <ArrowDown className="w-3 h-3"/> : <ArrowUp className="w-3 h-3"/>}
                                             </div>
                                         </th>
                                         {METRICS.map(m => (
