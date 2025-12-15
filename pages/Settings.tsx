@@ -7,12 +7,15 @@ declare const XLSX: any;
 const Settings: React.FC = () => {
   const [url, setUrl] = useState('');
   const [scriptUrl, setScriptUrl] = useState('');
-  const [scriptSaved, setScriptSaved] = useState(false);
   const [sourceType, setSourceType] = useState('demo');
   
   // URL Input State
   const [isUrlLocked, setIsUrlLocked] = useState(false);
+  const [isScriptUrlLocked, setIsScriptUrlLocked] = useState(false);
+  
+  // Modal State
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [modalMessage, setModalMessage] = useState('');
   const [countdown, setCountdown] = useState(3);
   
   // Test Connection State
@@ -22,14 +25,21 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     const savedUrl = getSheetUrl();
+    const savedScript = getGoogleScriptUrl();
+    
     setUrl(savedUrl);
-    setScriptUrl(getGoogleScriptUrl());
+    setScriptUrl(savedScript);
     setSourceType(getDataSourceType());
     setSyncStatus(checkSyncStatus());
 
     // Lock the input if a URL is already saved and it's not the default demo one (if applicable)
     if (savedUrl && savedUrl.length > 10) {
         setIsUrlLocked(true);
+    }
+    
+    // Lock script url if it looks valid
+    if (savedScript && savedScript.length > 10) {
+        setIsScriptUrlLocked(true);
     }
   }, []);
 
@@ -46,18 +56,25 @@ const Settings: React.FC = () => {
       return () => clearTimeout(timer);
   }, [showSuccessModal, countdown]);
 
+  const triggerSuccessModal = (msg: string) => {
+      setModalMessage(msg);
+      setCountdown(3);
+      setShowSuccessModal(true);
+  };
+
   const handleUrlSave = () => {
     saveSheetUrl(url.trim());
-    
-    // Trigger Success UI
-    setCountdown(3);
-    setShowSuccessModal(true);
-    setIsUrlLocked(true); // Lock it back
-    setTestStatus('idle'); // Reset test status
+    triggerSuccessModal('Your Google Sheet link has been updated successfully.');
+    setIsUrlLocked(true); 
+    setTestStatus('idle'); 
   };
 
   const handleEditUrl = () => {
       setIsUrlLocked(false);
+  };
+  
+  const handleEditScriptUrl = () => {
+      setIsScriptUrlLocked(false);
   };
 
   const handleTestConnection = async () => {
@@ -74,9 +91,10 @@ const Settings: React.FC = () => {
     }
     
     saveGoogleScriptUrl(scriptUrl);
-    setScriptSaved(true);
     setSyncStatus(checkSyncStatus()); // Re-check
-    setTimeout(() => setScriptSaved(false), 2000);
+    
+    triggerSuccessModal('Your Backup Script URL has been updated successfully.');
+    setIsScriptUrlLocked(true);
   };
 
   const handleExportBackup = async (format: 'xlsx' | 'json') => {
@@ -274,21 +292,40 @@ const Settings: React.FC = () => {
                 <label className="block text-sm font-medium text-slate-300 mb-2">
                   Google Apps Script Web App URL
                 </label>
-                <input
-                  type="text"
-                  value={scriptUrl}
-                  onChange={(e) => setScriptUrl(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/..."
-                  className="w-full bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-sm text-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none transition-all placeholder:text-slate-600"
-                />
+                <div className="relative group">
+                    <input
+                      type="text"
+                      value={scriptUrl}
+                      onChange={(e) => setScriptUrl(e.target.value)}
+                      disabled={isScriptUrlLocked}
+                      placeholder="https://script.google.com/macros/s/..."
+                      className={`w-full border rounded-lg p-3 pr-24 text-sm outline-none transition-all 
+                          ${isScriptUrlLocked 
+                              ? 'bg-slate-900 text-slate-500 border-slate-800 cursor-not-allowed select-none' 
+                              : 'bg-slate-950/50 text-white border-slate-700 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 placeholder:text-slate-600'
+                          }`}
+                    />
+                    
+                     <div className="absolute right-2 top-1.5 bottom-1.5">
+                        {isScriptUrlLocked ? (
+                            <button 
+                                onClick={handleEditScriptUrl}
+                                className="h-full px-3 text-xs font-medium text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded transition-colors flex items-center gap-1"
+                            >
+                                <Edit2 className="w-3.5 h-3.5" /> Change
+                            </button>
+                        ) : (
+                            <button 
+                                onClick={handleScriptUrlSave}
+                                className="h-full px-3 text-xs font-medium text-white bg-purple-600 hover:bg-purple-500 rounded transition-colors flex items-center gap-1 shadow-lg shadow-purple-900/20"
+                            >
+                                <Save className="w-3.5 h-3.5" /> Save
+                            </button>
+                        )}
+                    </div>
+                </div>
+                {isScriptUrlLocked && <p className="text-[10px] text-slate-600 mt-1 ml-1">URL is saved and locked. Click "Change" to update.</p>}
             </div>
-            <button
-                onClick={handleScriptUrlSave}
-                className="flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors text-sm font-medium"
-            >
-                <Save className="w-4 h-4 mr-2" />
-                {scriptSaved ? 'Connected!' : 'Save Script URL'}
-            </button>
         </div>
       </div>
 
@@ -329,7 +366,7 @@ const Settings: React.FC = () => {
                   </div>
                   <h3 className="text-xl font-bold text-white mb-2">Connection Saved!</h3>
                   <p className="text-slate-400 text-sm mb-6">
-                      Your Google Sheet link has been updated successfully.
+                      {modalMessage}
                   </p>
                   
                   <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden mb-4">
