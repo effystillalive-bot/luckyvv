@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Save, FileSpreadsheet, Upload, Trash2, CheckCircle, AlertCircle, Database, Download, FileJson, Info, AlertTriangle, RefreshCw, Zap, Play, Activity } from 'lucide-react';
-import { getSheetUrl, saveSheetUrl, processFile, getDataSourceType, clearLocalData, fetchData, getManualEntries, saveGoogleScriptUrl, getGoogleScriptUrl, testGoogleSheetConnection, checkSyncStatus } from '../services/dataService';
+import { Save, FileSpreadsheet, CheckCircle, Database, Download, FileJson, AlertTriangle, RefreshCw, Zap, Play, Activity, Edit2, X } from 'lucide-react';
+import { getSheetUrl, saveSheetUrl, getDataSourceType, fetchData, getManualEntries, saveGoogleScriptUrl, getGoogleScriptUrl, testGoogleSheetConnection, checkSyncStatus } from '../services/dataService';
 
 declare const XLSX: any;
 
 const Settings: React.FC = () => {
   const [url, setUrl] = useState('');
   const [scriptUrl, setScriptUrl] = useState('');
-  const [saved, setSaved] = useState(false);
   const [scriptSaved, setScriptSaved] = useState(false);
   const [sourceType, setSourceType] = useState('demo');
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
-  const [uploadError, setUploadError] = useState('');
+  
+  // URL Input State
+  const [isUrlLocked, setIsUrlLocked] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [countdown, setCountdown] = useState(3);
   
   // Test Connection State
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
@@ -19,19 +21,43 @@ const Settings: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState({ read: false, write: false });
 
   useEffect(() => {
-    setUrl(getSheetUrl());
+    const savedUrl = getSheetUrl();
+    setUrl(savedUrl);
     setScriptUrl(getGoogleScriptUrl());
     setSourceType(getDataSourceType());
     setSyncStatus(checkSyncStatus());
+
+    // Lock the input if a URL is already saved and it's not the default demo one (if applicable)
+    if (savedUrl && savedUrl.length > 10) {
+        setIsUrlLocked(true);
+    }
   }, []);
+
+  // Handle Success Modal Countdown
+  useEffect(() => {
+      let timer: any;
+      if (showSuccessModal && countdown > 0) {
+          timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+      } else if (showSuccessModal && countdown === 0) {
+          setShowSuccessModal(false);
+          // Optional: Reload to apply changes if needed, or just let user manually refresh
+          // window.location.reload(); 
+      }
+      return () => clearTimeout(timer);
+  }, [showSuccessModal, countdown]);
 
   const handleUrlSave = () => {
     saveSheetUrl(url.trim());
-    setSaved(true);
-    setTimeout(() => {
-        setSaved(false);
-        window.location.reload();
-    }, 1500);
+    
+    // Trigger Success UI
+    setCountdown(3);
+    setShowSuccessModal(true);
+    setIsUrlLocked(true); // Lock it back
+    setTestStatus('idle'); // Reset test status
+  };
+
+  const handleEditUrl = () => {
+      setIsUrlLocked(false);
   };
 
   const handleTestConnection = async () => {
@@ -51,29 +77,6 @@ const Settings: React.FC = () => {
     setScriptSaved(true);
     setSyncStatus(checkSyncStatus()); // Re-check
     setTimeout(() => setScriptSaved(false), 2000);
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploadStatus('uploading');
-    try {
-        await processFile(file);
-        setUploadStatus('success');
-        setTimeout(() => window.location.reload(), 1500);
-    } catch (err) {
-        setUploadStatus('error');
-        setUploadError('Failed to parse file. Ensure it is a valid Excel or CSV file.');
-        console.error(err);
-    }
-  };
-
-  const handleClearLocal = () => {
-      if (confirm('Are you sure? This will remove the uploaded Excel/CSV data and revert to the Google Sheet or Demo data.')) {
-          clearLocalData();
-          window.location.reload();
-      }
   };
 
   const handleExportBackup = async (format: 'xlsx' | 'json') => {
@@ -105,7 +108,7 @@ const Settings: React.FC = () => {
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8 pb-10">
+    <div className="max-w-3xl mx-auto space-y-8 pb-10 relative">
       <div>
         <div className="flex justify-between items-center">
              <div>
@@ -165,9 +168,6 @@ const Settings: React.FC = () => {
                         <li>Under General Access, select <strong>"Anyone with the link"</strong> as <strong>"Viewer"</strong>.</li>
                         <li>Click <strong>Copy link (複製連結)</strong> and paste it below.</li>
                     </ol>
-                    <p className="text-xs text-slate-500 italic">
-                        Updates using this method are nearly instant.
-                    </p>
                  </div>
              </div>
         </div>
@@ -177,24 +177,43 @@ const Settings: React.FC = () => {
             <label className="block text-sm font-medium text-slate-300 mb-2">
               Google Sheet Link
             </label>
-            <input
-              type="text"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/..."
-              className="w-full bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-sm text-white outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 transition-all placeholder:text-slate-600"
-            />
+            <div className="relative group">
+                <input
+                  type="text"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  disabled={isUrlLocked}
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                  className={`w-full border rounded-lg p-3 pr-24 text-sm outline-none transition-all 
+                      ${isUrlLocked 
+                          ? 'bg-slate-900 text-slate-500 border-slate-800 cursor-not-allowed select-none' 
+                          : 'bg-slate-950/50 text-white border-slate-700 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 placeholder:text-slate-600'
+                      }`}
+                />
+                
+                {/* Action Button inside input */}
+                <div className="absolute right-2 top-1.5 bottom-1.5">
+                    {isUrlLocked ? (
+                        <button 
+                            onClick={handleEditUrl}
+                            className="h-full px-3 text-xs font-medium text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded transition-colors flex items-center gap-1"
+                        >
+                            <Edit2 className="w-3.5 h-3.5" /> Change
+                        </button>
+                    ) : (
+                        <button 
+                            onClick={handleUrlSave}
+                            className="h-full px-3 text-xs font-medium text-white bg-primary-600 hover:bg-primary-500 rounded transition-colors flex items-center gap-1 shadow-lg shadow-primary-900/20"
+                        >
+                            <Save className="w-3.5 h-3.5" /> Save
+                        </button>
+                    )}
+                </div>
+            </div>
+            {isUrlLocked && <p className="text-[10px] text-slate-600 mt-1 ml-1">URL is saved and locked. Click "Change" to update.</p>}
           </div>
           
           <div className="flex items-center gap-3">
-              <button
-                onClick={handleUrlSave}
-                className="flex items-center px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors text-sm font-medium"
-              >
-                <Save className="w-4 h-4 mr-2" />
-                {saved ? 'Saved & Refreshing...' : 'Save Connection'}
-              </button>
-              
               <button
                 onClick={handleTestConnection}
                 disabled={!url || testStatus === 'testing'}
@@ -273,61 +292,6 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
-      {/* Option 1: File Upload */}
-      <div className={`bg-slate-900 border rounded-xl p-6 shadow-lg transition-all ${sourceType === 'local_file' ? 'border-emerald-500 ring-1 ring-emerald-500/20' : 'border-slate-800'}`}>
-        <div className="flex justify-between items-start mb-4">
-             <h2 className="text-lg font-semibold text-white flex items-center">
-                <Upload className="w-5 h-5 mr-2 text-emerald-500" /> 
-                Upload Excel / CSV (Local Override)
-            </h2>
-            {sourceType === 'local_file' && (
-                <button 
-                    onClick={handleClearLocal}
-                    className="text-xs text-rose-400 hover:text-rose-300 flex items-center px-2 py-1 bg-rose-950/30 rounded border border-rose-900/50"
-                >
-                    <Trash2 className="w-3 h-3 mr-1" /> Remove File
-                </button>
-            )}
-        </div>
-        
-        <div className="space-y-4">
-          <p className="text-sm text-slate-400">
-             Directly upload an Excel file (.xlsx, .xls) or CSV to serve as the main database. This will override any Google Sheet connection.
-          </p>
-          
-          <div className="relative">
-              <input
-                type="file"
-                accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-                onChange={handleFileUpload}
-                className="block w-full text-sm text-slate-400
-                  file:mr-4 file:py-2.5 file:px-4
-                  file:rounded-lg file:border-0
-                  file:text-sm file:font-semibold
-                  file:bg-slate-800 file:text-emerald-500
-                  hover:file:bg-slate-700
-                  cursor-pointer bg-slate-950/50 border border-slate-700 rounded-lg p-1"
-              />
-          </div>
-
-          {uploadStatus === 'uploading' && (
-              <div className="text-sm text-emerald-500 animate-pulse">Processing file...</div>
-          )}
-          {uploadStatus === 'success' && (
-              <div className="text-sm text-emerald-500 flex items-center">
-                  <CheckCircle className="w-4 h-4 mr-1" /> 
-                  File processed successfully! Reloading...
-              </div>
-          )}
-          {uploadStatus === 'error' && (
-              <div className="text-sm text-rose-500 flex items-center">
-                  <AlertCircle className="w-4 h-4 mr-1" /> 
-                  {uploadError}
-              </div>
-          )}
-        </div>
-      </div>
-
        {/* Data Backup Section */}
        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg">
            <h2 className="text-lg font-semibold text-white mb-2 flex items-center">
@@ -355,6 +319,32 @@ const Settings: React.FC = () => {
                </button>
            </div>
       </div>
+
+      {/* Success Modal */}
+      {showSuccessModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-slate-900 border border-slate-700 rounded-xl p-8 max-w-sm w-full shadow-2xl transform scale-100 animate-in zoom-in-95 duration-200 text-center relative">
+                  <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle className="w-8 h-8 text-emerald-500" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-2">Connection Saved!</h3>
+                  <p className="text-slate-400 text-sm mb-6">
+                      Your Google Sheet link has been updated successfully.
+                  </p>
+                  
+                  <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden mb-4">
+                      <div className="bg-emerald-500 h-full transition-all duration-1000 ease-linear" style={{ width: `${(countdown / 3) * 100}%` }}></div>
+                  </div>
+                  
+                  <button 
+                    onClick={() => setShowSuccessModal(false)}
+                    className="text-xs text-slate-500 hover:text-white"
+                  >
+                      Closing in {countdown}s...
+                  </button>
+              </div>
+          </div>
+      )}
     </div>
   );
 };
